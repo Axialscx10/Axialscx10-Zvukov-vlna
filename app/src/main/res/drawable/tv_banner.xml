@@ -1,0 +1,87 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Deep obsidian audiophile background -->
+    <path
+        android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="320"
+                android:endY="180"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF0E0D14" />
+                <item android:offset="0.55" android:color="#FF1A1423" />
+                <item android:offset="1.0" android:color="#FF2A1215" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Subtle ambient crimson glow on the left -->
+    <path
+        android:pathData="M78,90m-62,0a62,62 0,1 1,124 0a62,62 0,1 1,-124 0"
+        android:fillColor="#22FF3B5C" />
+
+    <!-- Vinyl disc body -->
+    <path
+        android:pathData="M78,90m-48,0a48,48 0,1 1,96 0a48,48 0,1 1,-96 0"
+        android:fillColor="#FF16161F"
+        android:strokeWidth="2"
+        android:strokeColor="#FF38384A" />
+
+    <!-- Vinyl grooves -->
+    <path
+        android:pathData="M78,90m-38,0a38,38 0,1 1,76 0a38,38 0,1 1,-76 0"
+        android:fillColor="#00000000"
+        android:strokeWidth="1"
+        android:strokeColor="#4400E5FF" />
+    <path
+        android:pathData="M78,90m-28,0a28,28 0,1 1,56 0a28,28 0,1 1,-56 0"
+        android:fillColor="#00000000"
+        android:strokeWidth="1"
+        android:strokeColor="#33FFFFFF" />
+
+    <!-- Center crimson label -->
+    <path
+        android:pathData="M78,90m-16,0a16,16 0,1 1,32 0a16,16 0,1 1,-32 0"
+        android:fillColor="#FFFF3B5C" />
+
+    <!-- Play triangle inside vinyl center -->
+    <path
+        android:pathData="M74,82L87,90L74,98Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- Equalizer / SoundWave bars on the right side -->
+    <path
+        android:pathData="M154,78h8v24h-8z"
+        android:fillColor="#FF00E5FF" />
+    <path
+        android:pathData="M170,62h8v56h-8z"
+        android:fillColor="#FF00E5FF" />
+    <path
+        android:pathData="M186,48h8v84h-8z"
+        android:fillColor="#FFFF3B5C" />
+    <path
+        android:pathData="M202,66h8v48h-8z"
+        android:fillColor="#FFFF3B5C" />
+    <path
+        android:pathData="M218,54h8v72h-8z"
+        android:fillColor="#FFFF6B4A" />
+    <path
+        android:pathData="M234,72h8v36h-8z"
+        android:fillColor="#FF00E5FF" />
+    <path
+        android:pathData="M250,60h8v60h-8z"
+        android:fillColor="#FFFF3B5C" />
+    <path
+        android:pathData="M266,76h8v28h-8z"
+        android:fillColor="#FF00E5FF" />
+    <path
+        android:pathData="M282,82h8v16h-8z"
+        android:fillColor="#8800E5FF" />
+</vector>
