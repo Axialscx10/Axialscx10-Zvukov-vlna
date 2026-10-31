@@ -17,4 +17,14 @@ class SoundWaveCleanTitleTest {
         assertEquals("Na Slamníku", cleanDisplayTitle("Na Slamníku"))
         assertEquals("Diamond Eyes", cleanDisplayTitle("Diamond Eyes"))
     }
+
+    @Test
+    fun testCleanUntaggedMetadata() {
+        // [Unknown Artist] / [Unknown Album] elimination
+        assertEquals("Karel Kryl", com.example.data.formatTrackSubtitle("[Unknown Artist]", "[Unknown Album]", "Karel Kryl - Morituri Te Salutant"))
+        assertEquals("lordxyxel", com.example.data.formatTrackSubtitle("lordxyxel", "[Unknown Album]", "Alkehol - Na Slamníku"))
+        assertEquals("Alkehol", com.example.data.formatTrackSubtitle("[Unknown Artist]", "[Unknown Album]", "Alkehol - Na Slamníku"))
+        assertEquals("Deftones • White Pony", com.example.data.formatTrackSubtitle("Deftones", "White Pony", "Change"))
+        assertEquals("Neznámy interpret", com.example.data.formatTrackSubtitle("[Unknown Artist]", "[Unknown Album]", "Track01"))
+    }
 }

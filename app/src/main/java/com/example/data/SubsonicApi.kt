@@ -353,7 +353,8 @@ class SubsonicApi(
         val tracks = a.arr("song").map(::songFrom)
         val cover = a.optString("coverArt").ifBlank { "al-$rawId" }
         val year = a.optInt("year")
-        val subtitle = listOf(a.optString("artist"), if (year > 0) year.toString() else "")
+        val rawArtist = cleanArtistName(a.optString("artist"))
+        val subtitle = listOf(rawArtist, if (year > 0) year.toString() else "")
             .filter { it.isNotBlank() }.joinToString(" • ")
         return CollectionDetail(
             id = "al:$rawId",
@@ -469,11 +470,22 @@ class SubsonicApi(
         if (bitRate > 0) techParts += "$bitRate kbps"
 
         val plays = o.optInt("playCount")
+        val cleanTitle = cleanDisplayTitle(o.optString("title").ifBlank { "Bez názvu" })
+        var cleanArtist = cleanArtistName(o.optString("artist"))
+        val cleanAlbum = cleanAlbumName(o.optString("album"))
+        if (cleanArtist.isBlank() && cleanTitle.contains(" - ")) {
+            val parts = cleanTitle.split(" - ", limit = 2)
+            if (parts[0].trim().isNotBlank()) {
+                cleanArtist = parts[0].trim()
+            }
+        }
+        val finalArtist = cleanArtist.ifBlank { "Neznámy interpret" }
+
         return TrackItem(
             id = id,
-            title = cleanDisplayTitle(o.optString("title").ifBlank { "Bez názvu" }),
-            artist = o.optString("artist").ifBlank { "Neznámy interpret" },
-            album = cleanDisplayTitle(o.optString("album")),
+            title = cleanTitle,
+            artist = finalArtist,
+            album = cleanAlbum,
             duration = formatDuration(durationSec),
             badge = badge,
             imageUrl = coverUrl(cover, 600),
@@ -499,7 +511,8 @@ class SubsonicApi(
         val year = o.optInt("year")
         val songs = o.optInt("songCount")
         val dur = o.optInt("duration")
-        val subtitle = listOf(o.optString("artist"), if (year > 0) year.toString() else "")
+        val rawArtist = cleanArtistName(o.optString("artist"))
+        val subtitle = listOf(rawArtist, if (year > 0) year.toString() else "")
             .filter { it.isNotBlank() }.joinToString(" • ")
         val spec = buildString {
             if (songs > 0) append("$songs ${plural(songs, "skladba", "skladby", "skladieb")}")

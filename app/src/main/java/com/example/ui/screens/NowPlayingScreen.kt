@@ -268,7 +268,9 @@ fun NowPlayingScreen(
                                 color = OnSurface,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.6.sp
+                                letterSpacing = 0.6.sp,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -301,7 +303,7 @@ fun NowPlayingScreen(
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Text(
-                                text = uiState.currentTrack.artist,
+                                text = com.example.data.cleanArtistName(uiState.currentTrack.artist).ifBlank { "Neznámy interpret" },
                                 color = OnSurfaceVariant,
                                 fontSize = 14.sp,
                                 maxLines = 1,

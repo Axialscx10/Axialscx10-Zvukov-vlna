@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.data.formatTrackSubtitle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CloudDone
@@ -541,11 +543,13 @@ private fun PlaylistTrackItemRow(
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     if (track.badge.isNotBlank()) {
                         Box(
                             modifier = Modifier
+                                .wrapContentWidth()
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (isActive) Primary.copy(alpha = 0.2f)
@@ -561,16 +565,19 @@ private fun PlaylistTrackItemRow(
                                     else -> OnSurfaceVariant
                                 },
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
                     Text(
-                        text = "${track.artist} • ${track.album}",
+                        text = formatTrackSubtitle(track.artist, track.album, track.title),
                         color = OnSurfaceVariant,
                         fontSize = 12.sp,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                 }
             }

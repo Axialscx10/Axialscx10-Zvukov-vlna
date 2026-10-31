@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -94,6 +95,7 @@ import coil.request.ImageRequest
 import com.example.data.AppScreen
 import com.example.data.SleepTimerOption
 import com.example.data.TrackItem
+import com.example.data.formatTrackSubtitle
 import com.example.ui.theme.OnPrimary
 import com.example.ui.theme.OnPrimaryContainer
 import com.example.ui.theme.OnSecondaryContainer
@@ -120,7 +122,8 @@ fun NetImage(
     url: String,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Crop
+    contentScale: ContentScale = ContentScale.Crop,
+    alignment: Alignment = Alignment.Center
 ) {
     val context = LocalContext.current
     SubcomposeAsyncImage(
@@ -130,6 +133,7 @@ fun NetImage(
             .build(),
         contentDescription = contentDescription,
         contentScale = contentScale,
+        alignment = alignment,
         modifier = modifier,
         loading = {
             SynthwaveFallbackArt()
@@ -141,16 +145,17 @@ fun NetImage(
 }
 
 @Composable
-fun SynthwaveFallbackArt() {
+fun SynthwaveFallbackArt(modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
+            .aspectRatio(1f)
             .background(
                 Brush.linearGradient(
                     colors = listOf(
-                        Color(0xFF280B2E),
-                        Color(0xFF4F1228),
-                        Color(0xFF0A2436)
+                        Color(0xFF201625),
+                        Color(0xFF2D1420),
+                        Color(0xFF131D2A)
                     )
                 )
             ),
@@ -159,8 +164,10 @@ fun SynthwaveFallbackArt() {
         Icon(
             imageVector = Icons.Default.Album,
             contentDescription = null,
-            tint = Primary.copy(alpha = 0.6f),
-            modifier = Modifier.size(24.dp)
+            tint = Primary.copy(alpha = 0.75f),
+            modifier = Modifier
+                .fillMaxSize(0.48f)
+                .aspectRatio(1f)
         )
     }
 }
@@ -596,7 +603,7 @@ fun GlassMiniPlayerDock(
                     Spacer(modifier = Modifier.height(1.dp))
 
                     Text(
-                        text = subtitleVariant.ifBlank { track.artist },
+                        text = subtitleVariant.ifBlank { formatTrackSubtitle(track.artist, track.album, track.title) },
                         color = OnSurfaceVariant,
                         fontSize = 11.sp,
                         maxLines = 1,
