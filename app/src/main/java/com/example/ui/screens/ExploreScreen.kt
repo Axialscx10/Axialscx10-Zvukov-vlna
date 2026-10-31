@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import com.example.data.formatTrackSubtitle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -972,7 +974,8 @@ private fun ExploreTrackRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = track.title,
@@ -980,11 +983,13 @@ private fun ExploreTrackRow(
                         fontSize = 14.sp,
                         fontWeight = if (isPlayingHighlight) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (track.badge.isNotBlank()) {
                         Box(
                             modifier = Modifier
+                                .wrapContentWidth()
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (track.isHiResBadgeCyan) SecondaryFixed.copy(alpha = 0.2f)
@@ -996,14 +1001,16 @@ private fun ExploreTrackRow(
                                 text = track.badge,
                                 color = if (track.isHiResBadgeCyan) SecondaryFixed else OnSurfaceVariant,
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${track.artist} · ${track.album}",
+                    text = formatTrackSubtitle(track.artist, track.album, track.title),
                     color = OnSurfaceVariant,
                     fontSize = 12.sp,
                     maxLines = 1,
@@ -1055,11 +1062,12 @@ private fun ExploreAlbumGridCard(
 ) {
     Column(
         modifier = modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(SurfaceContainer)
             .clickable(onClick = onClick)
             .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(
             modifier = Modifier
@@ -1077,21 +1085,26 @@ private fun ExploreAlbumGridCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp)
+                        .padding(6.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Color.Black.copy(alpha = 0.65f))
+                        .background(Color.Black.copy(alpha = 0.75f))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = album.badge,
                         color = SecondaryFixed,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
         }
-        Column {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = album.title,
                 color = OnSurface,
@@ -1107,15 +1120,16 @@ private fun ExploreAlbumGridCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = album.techSpec,
-                color = Outline,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (album.techSpec.isNotBlank()) {
+                Text(
+                    text = album.techSpec,
+                    color = Outline,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

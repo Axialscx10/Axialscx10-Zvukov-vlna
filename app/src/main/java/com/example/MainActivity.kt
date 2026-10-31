@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppScreen
+import com.example.data.formatTrackSubtitle
 import com.example.ui.SoundWaveViewModel
 import com.example.ui.components.GlassMiniPlayerDock
 import com.example.ui.components.OnboardingGuideDialog
@@ -439,9 +440,7 @@ fun SoundWaveApp(
                 uiState.currentScreen != AppScreen.SERVER_LOGIN
             ) {
                 val track = uiState.currentTrack
-                val subtitle = listOf(track.artist, track.album)
-                    .filter { it.isNotBlank() }
-                    .joinToString(" • ")
+                val subtitle = formatTrackSubtitle(track.artist, track.album, track.title)
 
                 GlassMiniPlayerDock(
                     track = track,

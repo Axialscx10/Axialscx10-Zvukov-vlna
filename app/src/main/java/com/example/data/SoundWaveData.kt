@@ -222,3 +222,56 @@ fun cleanDisplayTitle(raw: String): String {
     return s.ifBlank { raw }
 }
 
+fun cleanArtistName(raw: String): String {
+    val s = raw.trim()
+    if (s.isBlank() ||
+        s.equals("[Unknown Artist]", ignoreCase = true) ||
+        s.equals("Unknown Artist", ignoreCase = true) ||
+        s.equals("Unknown", ignoreCase = true) ||
+        s.equals("[Neznámy interpret]", ignoreCase = true) ||
+        s.equals("Neznámy interpret", ignoreCase = true)
+    ) {
+        return ""
+    }
+    return s
+}
+
+fun cleanAlbumName(raw: String): String {
+    val s = raw.trim()
+    if (s.isBlank() ||
+        s.equals("[Unknown Album]", ignoreCase = true) ||
+        s.equals("Unknown Album", ignoreCase = true) ||
+        s.equals("Unknown", ignoreCase = true) ||
+        s.equals("[Neznámy album]", ignoreCase = true) ||
+        s.equals("Neznámy album", ignoreCase = true)
+    ) {
+        return ""
+    }
+    return cleanDisplayTitle(s)
+}
+
+/**
+ * Returns a human-friendly subtitle combining artist and album.
+ * Eliminates ugly "[Unknown Artist]" and "[Unknown Album]" tags.
+ * If title contains "Artist - Song", intelligently extracts the artist when missing.
+ */
+fun formatTrackSubtitle(artist: String, album: String, title: String = ""): String {
+    var a = cleanArtistName(artist)
+    val al = cleanAlbumName(album)
+
+    if (a.isBlank() && title.contains(" - ")) {
+        val parts = title.split(" - ", limit = 2)
+        if (parts[0].trim().isNotBlank()) {
+            a = parts[0].trim()
+        }
+    }
+
+    return when {
+        a.isNotBlank() && al.isNotBlank() -> "$a • $al"
+        a.isNotBlank() -> a
+        al.isNotBlank() -> al
+        else -> "Neznámy interpret"
+    }
+}
+
+
