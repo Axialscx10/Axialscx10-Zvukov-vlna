@@ -435,6 +435,7 @@ fun PlaylistDetailScreen(
                     index = index + 1,
                     track = track,
                     isActive = isActive,
+                    isPlaying = isActive && uiState.isPlaying,
                     isLiked = isLiked,
                     isDownloaded = isDownloaded,
                     onClick = { onTrackClick(track, tracks) },
@@ -473,6 +474,7 @@ private fun PlaylistTrackItemRow(
     index: Int,
     track: TrackItem,
     isActive: Boolean,
+    isPlaying: Boolean,
     isLiked: Boolean,
     isDownloaded: Boolean,
     onClick: () -> Unit,
@@ -499,6 +501,7 @@ private fun PlaylistTrackItemRow(
             ) {
                 if (isActive) {
                     AnimatedEqualizerBars(
+                        isAnimating = isPlaying,
                         barColor = Primary,
                         secondaryBarColor = Primary,
                         barWidth = 3.dp,

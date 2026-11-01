@@ -67,6 +67,8 @@ data class SoundWaveUiState(
     val downloadedSizeText: String = "0.0 MB",
     val trackMenuTarget: TrackItem? = null,
     val showOnboarding: Boolean = false,
+    val themeMode: String = "DARK", // "DARK", "LIGHT", "SYSTEM", "AMOLED"
+    val isSimpleMode: Boolean = false,
     /** One-shot text for a Toast (errors, confirmations). Cleared by consumeMessage(). */
     val message: String? = null,
 
@@ -258,13 +260,26 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             durationMs = restoredDur,
             playbackProgress = restoredProgress,
             historyTracks = history,
-            showOnboarding = !settings.isOnboardingCompleted()
+            showOnboarding = !settings.isOnboardingCompleted(),
+            themeMode = settings.getThemeMode(),
+            isSimpleMode = settings.isSimpleMode()
         )
     }
 
     // ---------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------
+
+    fun setThemeMode(mode: String) {
+        settings.setThemeMode(mode)
+        _uiState.update { it.copy(themeMode = mode) }
+    }
+
+    fun toggleSimpleMode() {
+        val next = !_uiState.value.isSimpleMode
+        settings.setSimpleMode(next)
+        _uiState.update { it.copy(isSimpleMode = next) }
+    }
 
     fun showMessage(text: String) {
         _uiState.update { it.copy(message = text) }

@@ -1,50 +1,102 @@
 package com.example.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 
-private val NocturneColorScheme = darkColorScheme(
-    primary = Primary,
-    onPrimary = OnPrimary,
-    primaryContainer = PrimaryContainer,
-    onPrimaryContainer = OnPrimaryContainer,
-    secondary = Secondary,
-    onSecondary = OnSecondary,
-    secondaryContainer = SecondaryContainer,
-    onSecondaryContainer = OnSecondaryContainer,
-    tertiary = Tertiary,
-    onTertiary = OnTertiary,
-    tertiaryContainer = TertiaryContainer,
-    onTertiaryContainer = OnTertiaryContainer,
-    background = Surface,
-    onBackground = OnSurface,
-    surface = Surface,
-    onSurface = OnSurface,
-    surfaceVariant = SurfaceVariant,
-    onSurfaceVariant = OnSurfaceVariant,
-    surfaceDim = SurfaceDim,
-    surfaceBright = SurfaceBright,
-    surfaceContainerLowest = SurfaceContainerLowest,
-    surfaceContainerLow = SurfaceContainerLow,
-    surfaceContainer = SurfaceContainer,
-    surfaceContainerHigh = SurfaceContainerHigh,
-    surfaceContainerHighest = SurfaceContainerHighest,
-    outline = Outline,
-    outlineVariant = OutlineVariant,
-    error = ErrorColor,
-    onError = OnErrorColor,
-    errorContainer = ErrorContainer,
-    onErrorContainer = OnErrorContainer
-)
+private fun createColorScheme(tokens: SoundWaveColors) = if (tokens.isDark) {
+    darkColorScheme(
+        primary = tokens.primary,
+        onPrimary = tokens.onPrimary,
+        primaryContainer = tokens.primaryContainer,
+        onPrimaryContainer = tokens.onPrimaryContainer,
+        secondary = tokens.secondary,
+        onSecondary = tokens.onSecondary,
+        secondaryContainer = tokens.secondaryContainer,
+        onSecondaryContainer = tokens.onSecondaryContainer,
+        tertiary = tokens.tertiary,
+        onTertiary = tokens.onTertiary,
+        tertiaryContainer = tokens.tertiaryContainer,
+        onTertiaryContainer = tokens.onTertiaryContainer,
+        background = tokens.surface,
+        onBackground = tokens.onSurface,
+        surface = tokens.surface,
+        onSurface = tokens.onSurface,
+        surfaceVariant = tokens.surfaceVariant,
+        onSurfaceVariant = tokens.onSurfaceVariant,
+        surfaceDim = tokens.surfaceDim,
+        surfaceBright = tokens.surfaceBright,
+        surfaceContainerLowest = tokens.surfaceContainerLowest,
+        surfaceContainerLow = tokens.surfaceContainerLow,
+        surfaceContainer = tokens.surfaceContainer,
+        surfaceContainerHigh = tokens.surfaceContainerHigh,
+        surfaceContainerHighest = tokens.surfaceContainerHighest,
+        outline = tokens.outline,
+        outlineVariant = tokens.outlineVariant,
+        error = tokens.errorColor,
+        onError = tokens.onErrorColor,
+        errorContainer = tokens.errorContainer,
+        onErrorContainer = tokens.onErrorContainer
+    )
+} else {
+    lightColorScheme(
+        primary = tokens.primary,
+        onPrimary = tokens.onPrimary,
+        primaryContainer = tokens.primaryContainer,
+        onPrimaryContainer = tokens.onPrimaryContainer,
+        secondary = tokens.secondary,
+        onSecondary = tokens.onSecondary,
+        secondaryContainer = tokens.secondaryContainer,
+        onSecondaryContainer = tokens.onSecondaryContainer,
+        tertiary = tokens.tertiary,
+        onTertiary = tokens.onTertiary,
+        tertiaryContainer = tokens.tertiaryContainer,
+        onTertiaryContainer = tokens.onTertiaryContainer,
+        background = tokens.surface,
+        onBackground = tokens.onSurface,
+        surface = tokens.surface,
+        onSurface = tokens.onSurface,
+        surfaceVariant = tokens.surfaceVariant,
+        onSurfaceVariant = tokens.onSurfaceVariant,
+        surfaceDim = tokens.surfaceDim,
+        surfaceBright = tokens.surfaceBright,
+        surfaceContainerLowest = tokens.surfaceContainerLowest,
+        surfaceContainerLow = tokens.surfaceContainerLow,
+        surfaceContainer = tokens.surfaceContainer,
+        surfaceContainerHigh = tokens.surfaceContainerHigh,
+        surfaceContainerHighest = tokens.surfaceContainerHighest,
+        outline = tokens.outline,
+        outlineVariant = tokens.outlineVariant,
+        error = tokens.errorColor,
+        onError = tokens.onErrorColor,
+        errorContainer = tokens.errorContainer,
+        onErrorContainer = tokens.onErrorContainer
+    )
+}
 
 @Composable
 fun MyApplicationTheme(
+    themeMode: String = "DARK",
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = NocturneColorScheme,
-        typography = Typography,
-        content = content
-    )
+    val isSystemDark = isSystemInDarkTheme()
+    val activeTokens = when (themeMode) {
+        "LIGHT" -> LightColorTokens
+        "AMOLED" -> AmoledColorTokens
+        "SYSTEM" -> if (isSystemDark) DarkColorTokens else LightColorTokens
+        else -> DarkColorTokens
+    }
+
+    val colorScheme = createColorScheme(activeTokens)
+
+    CompositionLocalProvider(LocalSoundWaveColors provides activeTokens) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }

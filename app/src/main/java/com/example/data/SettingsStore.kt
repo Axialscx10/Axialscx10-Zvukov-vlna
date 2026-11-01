@@ -71,6 +71,18 @@ class SettingsStore(context: Context) {
         prefs.edit().putBoolean(KEY_ONBOARDING_COMPLETED, completed).apply()
     }
 
+    fun getThemeMode(): String = prefs.getString(KEY_THEME_MODE, "DARK") ?: "DARK"
+
+    fun setThemeMode(mode: String) {
+        prefs.edit().putString(KEY_THEME_MODE, mode).apply()
+    }
+
+    fun isSimpleMode(): Boolean = prefs.getBoolean(KEY_SIMPLE_MODE, false)
+
+    fun setSimpleMode(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SIMPLE_MODE, enabled).apply()
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Playback state & History persistence (survives phone reboot & app restarts)
     // ---------------------------------------------------------------------------------------------
@@ -208,5 +220,7 @@ class SettingsStore(context: Context) {
         private const val KEY_LAST_QUEUE_INDEX = "last_queue_index"
         private const val KEY_HISTORY = "playback_history"
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
+        private const val KEY_THEME_MODE = "soundwave_theme_mode"
+        private const val KEY_SIMPLE_MODE = "soundwave_simple_mode"
     }
 }

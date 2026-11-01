@@ -822,6 +822,12 @@ private fun FrequencyResponseCurveCanvas(
     bands: List<Float>,
     modifier: Modifier = Modifier
 ) {
+    val canvasOnSurface = OnSurface
+    val canvasPrimary = Primary
+    val canvasPrimaryContainer = PrimaryContainer
+    val canvasSecondaryContainer = SecondaryContainer
+    val canvasTertiary = Tertiary
+
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
@@ -833,7 +839,7 @@ private fun FrequencyResponseCurveCanvas(
         for (r in 1 until rows) {
             val y = (h / rows) * r
             drawLine(
-                color = OnSurface.copy(alpha = 0.08f),
+                color = canvasOnSurface.copy(alpha = 0.08f),
                 start = Offset(0f, y),
                 end = Offset(w, y),
                 strokeWidth = 1f,
@@ -843,7 +849,7 @@ private fun FrequencyResponseCurveCanvas(
         for (c in 1..cols) {
             val x = (w / (cols + 1)) * c
             drawLine(
-                color = OnSurface.copy(alpha = 0.08f),
+                color = canvasOnSurface.copy(alpha = 0.08f),
                 start = Offset(x, 0f),
                 end = Offset(x, h),
                 strokeWidth = 1f,
@@ -853,7 +859,7 @@ private fun FrequencyResponseCurveCanvas(
 
         // 0 dB Center Line
         drawLine(
-            color = Primary.copy(alpha = 0.35f),
+            color = canvasPrimary.copy(alpha = 0.35f),
             start = Offset(0f, centerY),
             end = Offset(w, centerY),
             strokeWidth = 1.5f
@@ -894,8 +900,8 @@ private fun FrequencyResponseCurveCanvas(
             path = fillPath,
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    PrimaryContainer.copy(alpha = 0.35f),
-                    Primary.copy(alpha = 0.12f),
+                    canvasPrimaryContainer.copy(alpha = 0.35f),
+                    canvasPrimary.copy(alpha = 0.12f),
                     Color.Transparent
                 )
             )
@@ -905,10 +911,10 @@ private fun FrequencyResponseCurveCanvas(
             path = strokePath,
             brush = Brush.horizontalGradient(
                 colors = listOf(
-                    SecondaryContainer,
-                    PrimaryContainer,
-                    Primary,
-                    Tertiary
+                    canvasSecondaryContainer,
+                    canvasPrimaryContainer,
+                    canvasPrimary,
+                    canvasTertiary
                 )
             ),
             style = Stroke(width = 6.5f, cap = StrokeCap.Round)
@@ -1424,6 +1430,7 @@ private fun AutoEqCalibrationModalOverlay(
                                 Text("20 kHz", color = OnSurfaceVariant.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
+                            val curvePrimary = Primary
                             Canvas(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1432,7 +1439,7 @@ private fun AutoEqCalibrationModalOverlay(
                                 val w = size.width
                                 val h = size.height
                                 drawLine(
-                                    color = Primary.copy(alpha = 0.25f),
+                                    color = curvePrimary.copy(alpha = 0.25f),
                                     start = Offset(0f, h * 0.5f),
                                     end = Offset(w, h * 0.5f),
                                     strokeWidth = 1.5f,
@@ -1452,10 +1459,10 @@ private fun AutoEqCalibrationModalOverlay(
                                     lineTo(0f, h)
                                     close()
                                 }
-                                drawPath(areaPath, color = Primary.copy(alpha = 0.14f))
-                                drawPath(curvePath, color = Primary, style = Stroke(width = 5f, cap = StrokeCap.Round))
-                                drawCircle(color = Primary, radius = 6f, center = Offset(w * 0.22f, h * 0.36f))
-                                drawCircle(color = Primary, radius = 6f, center = Offset(w * 0.72f, h * 0.36f))
+                                drawPath(areaPath, color = curvePrimary.copy(alpha = 0.14f))
+                                drawPath(curvePath, color = curvePrimary, style = Stroke(width = 5f, cap = StrokeCap.Round))
+                                drawCircle(color = curvePrimary, radius = 6f, center = Offset(w * 0.22f, h * 0.36f))
+                                drawCircle(color = curvePrimary, radius = 6f, center = Offset(w * 0.72f, h * 0.36f))
                             }
                         }
 

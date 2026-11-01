@@ -62,8 +62,10 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         setContent {
-            MyApplicationTheme {
-                SoundWaveApp()
+            val viewModel: SoundWaveViewModel = viewModel()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            MyApplicationTheme(themeMode = uiState.themeMode) {
+                SoundWaveApp(viewModel = viewModel)
             }
         }
     }
@@ -121,7 +123,8 @@ fun SoundWaveApp(
     val isMainTabScreen = uiState.currentScreen in setOf(
         AppScreen.HOME,
         AppScreen.EXPLORE,
-        AppScreen.LIBRARY
+        AppScreen.LIBRARY,
+        AppScreen.UPGRADE_STREAMING
     )
 
     Box(
@@ -203,7 +206,7 @@ fun SoundWaveApp(
                     StackTopBar(
                         title = when (uiState.currentScreen) {
                             AppScreen.PLAYLIST_DETAIL -> uiState.detail?.kind ?: "Detail"
-                            AppScreen.UPGRADE_STREAMING -> "Kvalita streamovania"
+                            AppScreen.UPGRADE_STREAMING -> "Nastavenia"
                             else -> "Práve hrá"
                         },
                         showLogo = true,
@@ -403,7 +406,11 @@ fun SoundWaveApp(
                                 onCrossfadeChange = { viewModel.setCrossfadeSeconds(it) },
                                 onClearCache = { viewModel.clearStreamCache() },
                                 onRunDiagnostics = { viewModel.runTranscodingDiagnostics() },
-                                onClearDownloads = { viewModel.clearAllDownloads() }
+                                onClearDownloads = { viewModel.clearAllDownloads() },
+                                onThemeModeChange = { viewModel.setThemeMode(it) },
+                                onToggleSimpleMode = { viewModel.toggleSimpleMode() },
+                                onOpenEqualizer = { viewModel.navigateTo(AppScreen.EQUALIZER) },
+                                onOpenGuide = { viewModel.showOnboardingGuide() }
                             )
                         }
                         AppScreen.SERVER_LOGIN -> {

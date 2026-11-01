@@ -4,7 +4,7 @@ enum class AppScreen(val title: String) {
     HOME("Domov"),
     EXPLORE("Objavuj"),
     LIBRARY("Knižnica"),
-    UPGRADE_STREAMING("Kvalita streamovania"),
+    UPGRADE_STREAMING("Nastavenia"),
     NOW_PLAYING("Práve hrá"),
     PLAYLIST_DETAIL("Detail"),
     EQUALIZER("Ekvalizér a zvukové profily"),
