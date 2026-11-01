@@ -58,12 +58,14 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -175,66 +177,98 @@ fun SynthwaveFallbackArt(modifier: Modifier = Modifier) {
 @Composable
 fun AnimatedEqualizerBars(
     modifier: Modifier = Modifier,
+    isAnimating: Boolean = true,
     barColor: Color = PrimaryContainer,
     secondaryBarColor: Color = SecondaryFixed,
     barWidth: Dp = 3.dp,
     maxHeight: Dp = 16.dp
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "eq_bars")
-    val bar1 by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(420, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "b1"
-    )
-    val bar2 by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 0.3f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(350, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "b2"
-    )
-    val bar3 by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 0.95f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "b3"
-    )
+    if (isAnimating) {
+        val infiniteTransition = rememberInfiniteTransition(label = "eq_bars")
+        val bar1 by infiniteTransition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(420, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "b1"
+        )
+        val bar2 by infiniteTransition.animateFloat(
+            initialValue = 0.9f,
+            targetValue = 0.3f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(350, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "b2"
+        )
+        val bar3 by infiniteTransition.animateFloat(
+            initialValue = 0.45f,
+            targetValue = 0.95f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(500, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "b3"
+        )
 
-    Row(
-        modifier = modifier.height(maxHeight),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(barWidth)
-                .fillMaxHeight(bar1)
-                .clip(RoundedCornerShape(50))
-                .background(barColor)
-        )
-        Box(
-            modifier = Modifier
-                .width(barWidth)
-                .fillMaxHeight(bar2)
-                .clip(RoundedCornerShape(50))
-                .background(secondaryBarColor)
-        )
-        Box(
-            modifier = Modifier
-                .width(barWidth)
-                .fillMaxHeight(bar3)
-                .clip(RoundedCornerShape(50))
-                .background(barColor)
-        )
+        Row(
+            modifier = modifier.height(maxHeight),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(barWidth)
+                    .fillMaxHeight(bar1)
+                    .clip(RoundedCornerShape(50))
+                    .background(barColor)
+            )
+            Box(
+                modifier = Modifier
+                    .width(barWidth)
+                    .fillMaxHeight(bar2)
+                    .clip(RoundedCornerShape(50))
+                    .background(secondaryBarColor)
+            )
+            Box(
+                modifier = Modifier
+                    .width(barWidth)
+                    .fillMaxHeight(bar3)
+                    .clip(RoundedCornerShape(50))
+                    .background(barColor)
+            )
+        }
+    } else {
+        // Paused state: Static bars with ZERO animation, zero recompositions, and zero battery drain!
+        Row(
+            modifier = modifier.height(maxHeight),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(barWidth)
+                    .fillMaxHeight(0.40f)
+                    .clip(RoundedCornerShape(50))
+                    .background(barColor.copy(alpha = 0.75f))
+            )
+            Box(
+                modifier = Modifier
+                    .width(barWidth)
+                    .fillMaxHeight(0.70f)
+                    .clip(RoundedCornerShape(50))
+                    .background(secondaryBarColor.copy(alpha = 0.75f))
+            )
+            Box(
+                modifier = Modifier
+                    .width(barWidth)
+                    .fillMaxHeight(0.45f)
+                    .clip(RoundedCornerShape(50))
+                    .background(barColor.copy(alpha = 0.75f))
+            )
+        }
     }
 }
 
@@ -716,12 +750,12 @@ fun SoundWaveBottomNavBar(
                 testTag = "nav_library"
             )
             BottomNavItem(
-                label = "Kvalita",
+                label = "Nastavenia",
                 selected = currentScreen == AppScreen.UPGRADE_STREAMING,
-                selectedIcon = Icons.Filled.WorkspacePremium,
-                unselectedIcon = Icons.Outlined.WorkspacePremium,
+                selectedIcon = Icons.Filled.Settings,
+                unselectedIcon = Icons.Outlined.Settings,
                 onClick = { onTabSelected(AppScreen.UPGRADE_STREAMING) },
-                testTag = "nav_upgrade"
+                testTag = "nav_settings"
             )
         }
     }

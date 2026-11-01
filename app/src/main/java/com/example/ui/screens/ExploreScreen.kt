@@ -597,9 +597,11 @@ fun ExploreScreen(
 
                     tracks.forEach { track ->
                         val isLiked = track.id in uiState.likedTrackIds
+                        val isCurrent = uiState.currentTrack.id == track.id
                         ExploreTrackRow(
                             track = track,
-                            isPlayingHighlight = uiState.currentTrack.id == track.id,
+                            isPlayingHighlight = isCurrent,
+                            isActuallyPlaying = isCurrent && uiState.isPlaying,
                             isLiked = isLiked,
                             onClick = { onTrackClick(track, tracks) },
                             onLikeClick = { onTrackLikeToggle(track.id) },
@@ -924,6 +926,7 @@ private fun AudiophileTagPill(
 private fun ExploreTrackRow(
     track: TrackItem,
     isPlayingHighlight: Boolean,
+    isActuallyPlaying: Boolean,
     isLiked: Boolean,
     onClick: () -> Unit,
     onLikeClick: () -> Unit,
@@ -960,6 +963,7 @@ private fun ExploreTrackRow(
                         contentAlignment = Alignment.Center
                     ) {
                         AnimatedEqualizerBars(
+                            isAnimating = isActuallyPlaying,
                             barColor = PrimaryContainer,
                             secondaryBarColor = PrimaryContainer,
                             barWidth = 3.dp,

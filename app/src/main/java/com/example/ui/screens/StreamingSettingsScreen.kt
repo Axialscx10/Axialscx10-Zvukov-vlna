@@ -50,6 +50,17 @@ import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Brightness4
+import androidx.compose.material.icons.filled.Brightness7
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -120,7 +131,11 @@ fun StreamingSettingsScreen(
     onCrossfadeChange: (Int) -> Unit,
     onClearCache: () -> Unit,
     onRunDiagnostics: () -> Unit,
-    onClearDownloads: () -> Unit = {}
+    onClearDownloads: () -> Unit = {},
+    onThemeModeChange: (String) -> Unit = {},
+    onToggleSimpleMode: () -> Unit = {},
+    onOpenEqualizer: () -> Unit = {},
+    onOpenGuide: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = Modifier
@@ -237,6 +252,218 @@ fun StreamingSettingsScreen(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+        }
+
+        // Section: VZHĽAD A MOTÍV (Svetlý / Tmavý / Amoled / Systémový + Zjednodušený režim)
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceContainerLow)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Palette,
+                        contentDescription = null,
+                        tint = Primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Vzhľad a motív aplikácie",
+                        color = OnSurface,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // 4 Theme Buttons: Tmavý, Svetlý, Amoled, Systém
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val themes = listOf(
+                        Triple("DARK", "Tmavý", Icons.Default.DarkMode),
+                        Triple("LIGHT", "Svetlý", Icons.Default.LightMode),
+                        Triple("AMOLED", "Amoled", Icons.Default.Brightness4),
+                        Triple("SYSTEM", "Systém", Icons.Default.BrightnessAuto)
+                    )
+
+                    themes.forEach { (mode, label, icon) ->
+                        val isSelected = uiState.themeMode == mode
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) Primary.copy(alpha = 0.2f) else SurfaceContainerHigh)
+                                .clickable { onThemeModeChange(mode) }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = label,
+                                tint = if (isSelected) Primary else OnSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = label,
+                                color = if (isSelected) Primary else OnSurface,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(SurfaceContainerHighest)
+                )
+
+                // Simple Mode Toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggleSimpleMode() },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = if (uiState.isSimpleMode) SecondaryFixed else OnSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Zjednodušené rozhranie",
+                                color = OnSurface,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (uiState.isSimpleMode)
+                                "Zapnuté: Skryté zložité audiofilské parametre pre čistý zážitok"
+                            else
+                                "Vypnuté: Zobrazujú sa detailné technické audio parametre a FFmpeg",
+                            color = OnSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Switch(
+                        checked = uiState.isSimpleMode,
+                        onCheckedChange = { onToggleSimpleMode() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Primary,
+                            checkedTrackColor = PrimaryContainer.copy(alpha = 0.5f)
+                        )
+                    )
+                }
+            }
+        }
+
+        // Section: RÝCHLE NÁSTROJE (Ekvalizér a Sprievodca)
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Ekvalizér Card
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SurfaceContainerLow)
+                        .clickable { onOpenEqualizer() }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(SurfaceContainerHigh),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Equalizer,
+                            contentDescription = null,
+                            tint = Primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Ekvalizér & DSP",
+                            color = OnSurface,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "10 pásiem & AutoEQ",
+                            color = OnSurfaceVariant,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                // Manuál Card
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SurfaceContainerLow)
+                        .clickable { onOpenGuide() }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(SurfaceContainerHigh),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MenuBook,
+                            contentDescription = null,
+                            tint = SecondaryFixed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Sprievodca",
+                            color = OnSurface,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Klikací manuál",
+                            color = OnSurfaceVariant,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
             }
         }
@@ -530,8 +757,9 @@ fun StreamingSettingsScreen(
             }
         }
 
-        // Section 2: Serverové transkódovanie ffmpeg
-        item {
+        // Section 2: Serverové transkódovanie ffmpeg (skryté v zjednodušenom režime)
+        if (!uiState.isSimpleMode) {
+            item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -712,6 +940,7 @@ fun StreamingSettingsScreen(
                     }
                 }
             }
+        }
         }
 
         // Section 3: Audio výstup & Audiophile
@@ -1163,45 +1392,88 @@ fun StreamingSettingsScreen(
             }
         }
 
-        // Section 5: Diagnostic Action Button
+        // Section 5: Diagnostic Action Button (skryté v zjednodušenom režime)
+        if (!uiState.isSimpleMode) {
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .shadow(14.dp, RoundedCornerShape(50), spotColor = PrimaryContainer)
+                            .clip(RoundedCornerShape(50))
+                            .background(Primary)
+                            .clickable { onRunDiagnostics() }
+                            .testTag("test_diagnostics_btn"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.isTestingDiagnostics) Icons.Default.Sync else Icons.Default.NetworkCheck,
+                            contentDescription = null,
+                            tint = OnPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (uiState.isTestingDiagnostics) "Pripájam ffmpeg test stream..." else "Otestovať transkódovanie a latenciu",
+                            color = OnPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    AnimatedVisibility(visible = uiState.diagnosticResultVisible) {
+                        Text(
+                            text = uiState.diagnosticResultText,
+                            color = Secondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section: O aplikácii SoundWave
         item {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceContainerLow)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .shadow(14.dp, RoundedCornerShape(50), spotColor = PrimaryContainer)
-                        .clip(RoundedCornerShape(50))
-                        .background(Primary)
-                        .clickable { onRunDiagnostics() }
-                        .testTag("test_diagnostics_btn"),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = if (uiState.isTestingDiagnostics) Icons.Default.Sync else Icons.Default.NetworkCheck,
+                        imageVector = Icons.Default.Info,
                         contentDescription = null,
-                        tint = OnPrimary,
-                        modifier = Modifier.size(20.dp)
+                        tint = Primary,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (uiState.isTestingDiagnostics) "Pripájam ffmpeg test stream..." else "Otestovať transkódovanie a latenciu",
-                        color = OnPrimary,
-                        fontSize = 14.sp,
+                        text = "O aplikácii SoundWave",
+                        color = OnSurface,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
-
-                AnimatedVisibility(visible = uiState.diagnosticResultVisible) {
-                    Text(
-                        text = uiState.diagnosticResultText,
-                        color = Secondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
+                Text(
+                    text = "Verzia 5.7 (Build 12) • Pripravené pre Google TV a smartfóny",
+                    color = OnSurfaceVariant,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = "Podpora Navidrome / Subsonic API v1.16.1 • Bezstratové FLAC & gapless prehrávanie • 10-pásmový DSP ekvalizér & AutoEQ profily",
+                    color = Outline,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
             }
         }
     }

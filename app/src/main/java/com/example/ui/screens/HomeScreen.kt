@@ -215,6 +215,7 @@ fun HomeScreen(
                             QuickPickTrackRow(
                                 track = track,
                                 isActive = isActive,
+                                isPlaying = isActive && uiState.isPlaying,
                                 isLiked = isLiked,
                                 onClick = { onTrackClick(track) },
                                 onLikeClick = { onTrackLikeToggle(track.id) },
@@ -417,6 +418,7 @@ private fun HomeAlbumSection(
 private fun QuickPickTrackRow(
     track: TrackItem,
     isActive: Boolean,
+    isPlaying: Boolean,
     isLiked: Boolean,
     onClick: () -> Unit,
     onLikeClick: () -> Unit,
@@ -455,6 +457,7 @@ private fun QuickPickTrackRow(
                         contentAlignment = Alignment.Center
                     ) {
                         AnimatedEqualizerBars(
+                            isAnimating = isPlaying,
                             barColor = Primary,
                             secondaryBarColor = Secondary,
                             barWidth = 3.dp,
