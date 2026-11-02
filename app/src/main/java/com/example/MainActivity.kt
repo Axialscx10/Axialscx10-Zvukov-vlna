@@ -54,13 +54,31 @@ import com.example.ui.screens.StreamingSettingsScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.Surface
 
+import android.content.Context
+import androidx.compose.runtime.remember
+
+fun isTelevision(context: Context): Boolean {
+    val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
+    if (uiModeManager?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) {
+        return true
+    }
+    val pm = context.packageManager
+    return pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+           pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
+           !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        )
+        try {
+            enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+                navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+            )
+        } catch (_: Throwable) {
+            // TV ROMs or custom displays may lack standard window insets controllers
+        }
         setContent {
             val viewModel: SoundWaveViewModel = viewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -77,17 +95,25 @@ fun SoundWaveApp(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val isTv = remember(context) { isTelevision(context) }
 
-    // Android 13+ needs a runtime permission for the playback notification (lock screen controls).
+    // Android 13+ needs a runtime permission for the playback notification on phones & tablets.
+    // On Android TV / Google TV, notifications are not supported and requesting POST_NOTIFICATIONS
+    // throws an ActivityNotFoundException or SecurityException that crashes the app on startup.
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+    LaunchedEffect(isTv) {
+        if (!isTv &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            try {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } catch (_: Throwable) {
+                // Gracefully ignore on devices without a permissions dialog activity
+            }
         }
     }
 

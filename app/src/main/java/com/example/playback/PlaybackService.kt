@@ -33,16 +33,22 @@ class PlaybackService : MediaSessionService() {
                 /* handleAudioFocus = */ true
             )
             .setHandleAudioBecomingNoisy(true)
-            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
 
-        // Attach hardware DSP equalizer & effects to the player session
-        AudioEffectsManager.attachAudioSession(player.audioSessionId)
-        player.addListener(object : androidx.media3.common.Player.Listener {
-            override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                AudioEffectsManager.attachAudioSession(audioSessionId)
-            }
-        })
+        // Attach hardware DSP equalizer & effects to the player session safely
+        try {
+            AudioEffectsManager.attachAudioSession(player.audioSessionId)
+            player.addListener(object : androidx.media3.common.Player.Listener {
+                override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                    try {
+                        AudioEffectsManager.attachAudioSession(audioSessionId)
+                    } catch (_: Throwable) {}
+                }
+            })
+        } catch (_: Throwable) {
+            // Some TV platforms or audio sinks do not support hardware AudioEffects
+        }
 
         val openAppIntent = PendingIntent.getActivity(
             this,
