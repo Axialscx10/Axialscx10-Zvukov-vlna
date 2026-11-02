@@ -33,7 +33,7 @@ object AudioEffectsManager {
                 enabled = masterEnabled
             }
             applyEqualizerSettings()
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             equalizer = null
         }
 
@@ -42,7 +42,7 @@ object AudioEffectsManager {
                 enabled = masterEnabled && (subBassBoostDb > 0.1f)
             }
             applyBassBoostSettings()
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             bassBoost = null
         }
     }
@@ -53,7 +53,7 @@ object AudioEffectsManager {
         try {
             equalizer?.enabled = enabled
             bassBoost?.enabled = enabled && (subBassBoostDb > 0.1f)
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     @Synchronized
@@ -96,7 +96,7 @@ object AudioEffectsManager {
                 val millibels = (dbVal * 100).roundToInt().coerceIn(minMb, maxMb).toShort()
                 eq.setBandLevel(i.toShort(), millibels)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     private fun applyBassBoostSettings() {
@@ -107,18 +107,18 @@ object AudioEffectsManager {
                 val strength = ((subBassBoostDb / 10f) * 1000).roundToInt().coerceIn(0, 1000).toShort()
                 bb.setStrength(strength)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     @Synchronized
     fun releaseEffects() {
         try {
             equalizer?.release()
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         equalizer = null
         try {
             bassBoost?.release()
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         bassBoost = null
     }
 }
