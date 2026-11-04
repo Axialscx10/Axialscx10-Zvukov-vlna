@@ -709,8 +709,10 @@ fun GlassMiniPlayerDock(
 @Composable
 fun SoundWaveBottomNavBar(
     currentScreen: AppScreen,
+    strings: com.example.data.AppStringsBundle? = null,
     onTabSelected: (AppScreen) -> Unit
 ) {
+    val s = strings ?: com.example.data.AppStrings.forLanguage("sk")
     Surface(
         color = Color(0xFF111015), // 100% solid opaque - zero bleed-through!
         shadowElevation = 12.dp,
@@ -726,7 +728,7 @@ fun SoundWaveBottomNavBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             BottomNavItem(
-                label = "Domov",
+                label = s.navHome,
                 selected = currentScreen == AppScreen.HOME,
                 selectedIcon = Icons.Filled.Home,
                 unselectedIcon = Icons.Outlined.Home,
@@ -734,7 +736,7 @@ fun SoundWaveBottomNavBar(
                 testTag = "nav_home"
             )
             BottomNavItem(
-                label = "Objavuj",
+                label = s.navExplore,
                 selected = currentScreen == AppScreen.EXPLORE,
                 selectedIcon = Icons.Filled.Explore,
                 unselectedIcon = Icons.Outlined.Explore,
@@ -742,7 +744,7 @@ fun SoundWaveBottomNavBar(
                 testTag = "nav_explore"
             )
             BottomNavItem(
-                label = "Knižnica",
+                label = s.navLibrary,
                 selected = currentScreen == AppScreen.LIBRARY,
                 selectedIcon = Icons.Filled.LibraryMusic,
                 unselectedIcon = Icons.Outlined.LibraryMusic,
@@ -750,7 +752,7 @@ fun SoundWaveBottomNavBar(
                 testTag = "nav_library"
             )
             BottomNavItem(
-                label = "Nastavenia",
+                label = s.navSettings,
                 selected = currentScreen == AppScreen.UPGRADE_STREAMING,
                 selectedIcon = Icons.Filled.Settings,
                 unselectedIcon = Icons.Outlined.Settings,

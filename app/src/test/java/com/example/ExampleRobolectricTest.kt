@@ -65,4 +65,27 @@ class ExampleRobolectricTest {
     store.clearHistory()
     assertEquals(0, store.loadHistory().size)
   }
+
+  @Test
+  fun `widget state update and android auto media constants are valid`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.widget.SoundWaveWidgetProvider.updateWidgetState(context, "Midnight City", "M83", true)
+    assertEquals("root", com.example.playback.PlaybackService.MEDIA_ID_ROOT)
+    assertEquals("history", com.example.playback.PlaybackService.MEDIA_ID_HISTORY)
+  }
+
+  @Test
+  fun `multi-language localization bundles provide valid translations`() {
+    val sk = com.example.data.AppStrings.forLanguage("sk")
+    val en = com.example.data.AppStrings.forLanguage("en")
+    val cs = com.example.data.AppStrings.forLanguage("cs")
+
+    assertEquals("Domov", sk.navHome)
+    assertEquals("Home", en.navHome)
+    assertEquals("Domů", cs.navHome)
+
+    assertEquals("Nastavenia", sk.navSettings)
+    assertEquals("Settings", en.navSettings)
+    assertEquals("Nastavení", cs.navSettings)
+  }
 }

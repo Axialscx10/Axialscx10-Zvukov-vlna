@@ -434,6 +434,7 @@ fun SoundWaveApp(
                                 onRunDiagnostics = { viewModel.runTranscodingDiagnostics() },
                                 onClearDownloads = { viewModel.clearAllDownloads() },
                                 onThemeModeChange = { viewModel.setThemeMode(it) },
+                                onLanguageChange = { viewModel.setAppLanguage(it) },
                                 onToggleSimpleMode = { viewModel.toggleSimpleMode() },
                                 onOpenEqualizer = { viewModel.navigateTo(AppScreen.EQUALIZER) },
                                 onOpenGuide = { viewModel.showOnboardingGuide() }
@@ -503,6 +504,7 @@ fun SoundWaveApp(
             if (isMainTabScreen) {
                 SoundWaveBottomNavBar(
                     currentScreen = uiState.currentScreen,
+                    strings = uiState.strings,
                     onTabSelected = { viewModel.navigateTo(it) }
                 )
             }
