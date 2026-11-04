@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Brightness7
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Palette
@@ -133,6 +134,7 @@ fun StreamingSettingsScreen(
     onRunDiagnostics: () -> Unit,
     onClearDownloads: () -> Unit = {},
     onThemeModeChange: (String) -> Unit = {},
+    onLanguageChange: (String) -> Unit = {},
     onToggleSimpleMode: () -> Unit = {},
     onOpenEqualizer: () -> Unit = {},
     onOpenGuide: () -> Unit = {}
@@ -321,6 +323,83 @@ fun StreamingSettingsScreen(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1
                             )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(SurfaceContainerHighest)
+                )
+
+                // Jazyk aplikácie / Language selector
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                tint = Primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Jazyk aplikácie / Language",
+                                color = OnSurface,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // 4 Language Buttons: Systém, Slovenčina, English, Čeština
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val languages = listOf(
+                            Triple("SYSTEM", "Systém", "🌐"),
+                            Triple("sk", "Slovenčina", "🇸🇰"),
+                            Triple("en", "English", "🇬🇧"),
+                            Triple("cs", "Čeština", "🇨🇿")
+                        )
+
+                        languages.forEach { (code, label, flag) ->
+                            val isSelected = uiState.appLanguage.equals(code, ignoreCase = true)
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) Primary.copy(alpha = 0.2f) else SurfaceContainerHigh)
+                                    .clickable { onLanguageChange(code) }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = flag,
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Primary else OnSurface,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }

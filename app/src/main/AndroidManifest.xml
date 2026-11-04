@@ -39,6 +39,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
+        android:localeConfig="@xml/locales_config"
         android:theme="@style/Theme.MyApplication">
         <activity
             android:name=".MainActivity"
@@ -56,12 +57,35 @@
             </intent-filter>
         </activity>
 
+        <!-- Android Auto / Automotive Application metadata -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Home Screen Material You Widget Provider -->
+        <receiver
+            android:name=".widget.SoundWaveWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.soundwave.widget.ACTION_PLAY_PAUSE" />
+                <action android:name="com.example.soundwave.widget.ACTION_PREV" />
+                <action android:name="com.example.soundwave.widget.ACTION_NEXT" />
+                <action android:name="com.example.soundwave.widget.ACTION_UPDATE_STATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/soundwave_widget_info" />
+        </receiver>
+
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
     </application>

@@ -77,6 +77,12 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_THEME_MODE, mode).apply()
     }
 
+    fun getAppLanguage(): String = prefs.getString(KEY_APP_LANGUAGE, "SYSTEM") ?: "SYSTEM"
+
+    fun setAppLanguage(lang: String) {
+        prefs.edit().putString(KEY_APP_LANGUAGE, lang).apply()
+    }
+
     fun isSimpleMode(): Boolean = prefs.getBoolean(KEY_SIMPLE_MODE, false)
 
     fun setSimpleMode(enabled: Boolean) {
@@ -221,6 +227,7 @@ class SettingsStore(context: Context) {
         private const val KEY_HISTORY = "playback_history"
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_THEME_MODE = "soundwave_theme_mode"
+        private const val KEY_APP_LANGUAGE = "soundwave_app_language"
         private const val KEY_SIMPLE_MODE = "soundwave_simple_mode"
     }
 }

@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -52,6 +54,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -126,18 +129,39 @@ fun NowPlayingScreen(
         )
     }
 
+    // Dynamic atmospheric gradient extracted smoothly from track metadata & album art
+    val dynamicTopColor by animateColorAsState(
+        targetValue = remember(uiState.currentTrack.id, uiState.currentTrack.artist, uiState.currentTrack.album) {
+            val track = uiState.currentTrack
+            if (track.id.isBlank()) {
+                Color(0xFF281113)
+            } else {
+                val seed = (track.artist + track.title + track.album).hashCode()
+                val hue = kotlin.math.abs(seed) % 360
+                hslToComposeColor(hue.toFloat(), 0.55f, 0.16f)
+            }
+        },
+        animationSpec = tween(durationMillis = 800),
+        label = "dynamicBackground"
+    )
+
+    val surfaceColor = Surface
+    val backgroundBrush = remember(dynamicTopColor, uiState.themeMode, surfaceColor) {
+        val bottomSurface = if (uiState.themeMode == "AMOLED") Color.Black else surfaceColor
+        Brush.verticalGradient(
+            colors = listOf(
+                dynamicTopColor,
+                dynamicTopColor.copy(alpha = 0.55f),
+                bottomSurface,
+                bottomSurface
+            )
+        )
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF281113),
-                        Surface,
-                        Surface
-                    )
-                )
-            )
+            .background(backgroundBrush)
             .testTag("now_playing_screen"),
         contentPadding = PaddingValues(bottom = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -221,7 +245,7 @@ fun NowPlayingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .shadow(28.dp, RoundedCornerShape(20.dp), ambientColor = PrimaryContainer, spotColor = PrimaryContainer)
+                        .shadow(28.dp, RoundedCornerShape(20.dp), ambientColor = dynamicTopColor, spotColor = dynamicTopColor)
                         .clip(RoundedCornerShape(20.dp))
                         .background(SurfaceContainerLowest)
                 ) {
@@ -913,3 +937,24 @@ private fun DrawerTrackRow(
         }
     }
 }
+
+private fun hslToComposeColor(hue: Float, saturation: Float, lightness: Float): Color {
+    val c = (1f - kotlin.math.abs(2f * lightness - 1f)) * saturation
+    val x = c * (1f - kotlin.math.abs((hue / 60f) % 2f - 1f))
+    val m = lightness - c / 2f
+    val (r, g, b) = when {
+        hue < 60f -> Triple(c, x, 0f)
+        hue < 120f -> Triple(x, c, 0f)
+        hue < 180f -> Triple(0f, c, x)
+        hue < 240f -> Triple(0f, x, c)
+        hue < 300f -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    return Color(
+        red = (r + m).coerceIn(0f, 1f),
+        green = (g + m).coerceIn(0f, 1f),
+        blue = (b + m).coerceIn(0f, 1f),
+        alpha = 1f
+    )
+}
+

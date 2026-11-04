@@ -69,6 +69,8 @@ data class SoundWaveUiState(
     val showOnboarding: Boolean = false,
     val themeMode: String = "DARK", // "DARK", "LIGHT", "SYSTEM", "AMOLED"
     val isSimpleMode: Boolean = false,
+    val appLanguage: String = "SYSTEM",
+    val strings: com.example.data.AppStringsBundle = com.example.data.AppStrings.forLanguage("SYSTEM"),
     /** One-shot text for a Toast (errors, confirmations). Cleared by consumeMessage(). */
     val message: String? = null,
 
@@ -262,13 +264,35 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             historyTracks = history,
             showOnboarding = !settings.isOnboardingCompleted(),
             themeMode = settings.getThemeMode(),
-            isSimpleMode = settings.isSimpleMode()
+            isSimpleMode = settings.isSimpleMode(),
+            appLanguage = settings.getAppLanguage(),
+            strings = com.example.data.AppStrings.forLanguage(settings.getAppLanguage())
         )
     }
 
     // ---------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------
+
+    fun setAppLanguage(lang: String) {
+        settings.setAppLanguage(lang)
+        _uiState.update {
+            it.copy(
+                appLanguage = lang,
+                strings = com.example.data.AppStrings.forLanguage(lang)
+            )
+        }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                val localeManager = getApplication<Application>().getSystemService(android.app.LocaleManager::class.java)
+                localeManager?.applicationLocales = if (lang == "SYSTEM" || lang.isBlank()) {
+                    android.os.LocaleList.getEmptyLocaleList()
+                } else {
+                    android.os.LocaleList.forLanguageTags(lang)
+                }
+            }
+        } catch (_: Throwable) {}
+    }
 
     fun setThemeMode(mode: String) {
         settings.setThemeMode(mode)
