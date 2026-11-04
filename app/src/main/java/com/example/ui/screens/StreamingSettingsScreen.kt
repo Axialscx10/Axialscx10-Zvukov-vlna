@@ -1543,7 +1543,7 @@ fun StreamingSettingsScreen(
                     )
                 }
                 Text(
-                    text = "Verzia 5.9 (Build 14) • Pripravené pre Google TV a smartfóny",
+                    text = "Verzia 6.0 (Build 15) • Pripravené pre Google TV, Android Auto a smartfóny",
                     color = OnSurfaceVariant,
                     fontSize = 12.sp
                 )
