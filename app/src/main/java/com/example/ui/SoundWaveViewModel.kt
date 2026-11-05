@@ -127,6 +127,7 @@ data class SoundWaveUiState(
     val libraryAlbums: List<AlbumItem> = emptyList(),
     val libraryArtists: List<ArtistItem> = emptyList(),
     val favoriteTracks: List<TrackItem> = emptyList(),
+    val serverSongCount: Long = 0L,
     val libraryLoading: Boolean = false,
     val libraryError: String? = null,
 
@@ -586,6 +587,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val pls = async { a.playlists() }
                 val artists = async { a.artists() }
                 val fav = async { safe(emptyList<TrackItem>()) { a.starredTracks() } }
+                val scan = async { safe(com.example.data.ScanStatus(false, 0L)) { a.scanStatus() } }
                 val albums = async {
                     val all = mutableListOf<AlbumItem>()
                     var offset = 0
@@ -601,6 +603,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val artistsLoaded = artists.await()
                 val favLoaded = fav.await()
                 val albumsLoaded = albums.await()
+                val scanStatus = scan.await()
                 _uiState.update {
                     it.copy(
                         libraryLoading = false,
@@ -608,7 +611,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                         libraryPlaylists = plsLoaded,
                         libraryArtists = artistsLoaded,
                         libraryAlbums = albumsLoaded,
-                        favoriteTracks = favLoaded
+                        favoriteTracks = favLoaded,
+                        serverSongCount = if (scanStatus.count > 0L) scanStatus.count else it.serverSongCount
                     )
                 }
                 syncLikes(favLoaded)

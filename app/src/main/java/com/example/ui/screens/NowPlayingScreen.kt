@@ -647,11 +647,11 @@ fun NowPlayingScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf("NASLEDUJÚCE", "TEXT", "PODOBNÉ").forEach { tab ->
+                    listOf("ĎALŠIE", "TEXT", "PODOBNÉ").forEach { tab ->
                         val isSelected = uiState.nowPlayingTab == tab ||
-                            (tab == "NASLEDUJÚCE" && uiState.nowPlayingTab == "UP NEXT") ||
-                            (tab == "TEXT" && uiState.nowPlayingTab == "LYRICS") ||
-                            (tab == "PODOBNÉ" && uiState.nowPlayingTab == "RELATED")
+                            (tab == "ĎALŠIE" && (uiState.nowPlayingTab == "NASLEDUJÚCE" || uiState.nowPlayingTab == "UP NEXT" || uiState.nowPlayingTab == "ĎALŠIE")) ||
+                            (tab == "TEXT" && (uiState.nowPlayingTab == "LYRICS" || uiState.nowPlayingTab == "TEXT")) ||
+                            (tab == "PODOBNÉ" && (uiState.nowPlayingTab == "RELATED" || uiState.nowPlayingTab == "PODOBNÉ"))
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
@@ -727,7 +727,7 @@ private fun NowPlayingDrawerContent(
     onOpenTrackMenu: (TrackItem) -> Unit
 ) {
     when (uiState.nowPlayingTab) {
-        "NASLEDUJÚCE", "UP NEXT" -> {
+        "ĎALŠIE", "NASLEDUJÚCE", "UP NEXT" -> {
             val startIdx = (uiState.queueIndex + 1).coerceAtLeast(0)
             val upcoming = uiState.queue.drop(startIdx).take(50)
             if (upcoming.isEmpty()) {

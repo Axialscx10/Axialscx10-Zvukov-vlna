@@ -57,11 +57,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Android Auto / Automotive Application metadata -->
-        <meta-data
-            android:name="com.google.android.gms.car.application"
-            android:resource="@xml/automotive_app_desc" />
-
         <!-- Home Screen Material You Widget Provider -->
         <receiver
             android:name=".widget.SoundWaveWidgetProvider"
@@ -84,8 +79,6 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
-                <action android:name="androidx.media3.session.MediaLibraryService" />
-                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
     </application>

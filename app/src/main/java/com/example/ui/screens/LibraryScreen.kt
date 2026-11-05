@@ -231,12 +231,35 @@ fun LibraryScreen(
                         tint = Primary,
                         modifier = Modifier.size(18.dp)
                     )
+                    val countLabel = when (uiState.libraryFilterChip) {
+                        "Playlisty", "Playlists" -> "$itemCount playlistov"
+                        "Albumy", "Albums" -> "$itemCount albumov"
+                        "Interpreti", "Artists" -> "$itemCount interpretov"
+                        "História", "History" -> "$itemCount nedávnych skladieb"
+                        "Obľúbené", "Liked" -> "$itemCount obľúbených skladieb"
+                        "Stiahnuté", "Downloaded" -> "$itemCount offline skladieb"
+                        else -> "$itemCount položiek"
+                    }
                     Text(
-                        text = "${uiState.libraryFilterChip} · $itemCount",
+                        text = countLabel,
                         color = OnSurface,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                    if (uiState.serverSongCount > 0L) {
+                        Box(
+                            modifier = Modifier
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(OnSurfaceVariant.copy(alpha = 0.6f))
+                        )
+                        Text(
+                            text = "${java.text.NumberFormat.getIntegerInstance().format(uiState.serverSongCount)} skladieb na serveri",
+                            color = Secondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
                 Row(
