@@ -6,137 +6,29 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.LibraryResult
-import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
 import com.example.MainActivity
-import com.example.data.SettingsStore
 import com.example.widget.SoundWaveWidgetProvider
-import com.google.common.collect.ImmutableList
-import com.google.common.util.concurrent.Futures
-import com.google.common.util.concurrent.ListenableFuture
 
 /**
- * Background playback service extending MediaLibraryService to support:
- * 1. Android Auto and Automotive head units (media browsing tree & controls).
- * 2. MediaSession notification and lock screen controls.
- * 3. Home Screen Material You widget synchronization.
+ * Background playback service owning ExoPlayer and MediaSession.
+ * Supports:
+ * 1. Background audio playback and system media notification (lock screen & Bluetooth).
+ * 2. Home Screen Material You widget synchronization.
+ * 3. Safe hardware DSP equalizer & effects.
  */
 @OptIn(UnstableApi::class)
-class PlaybackService : MediaLibraryService() {
+class PlaybackService : MediaSessionService() {
 
-    private var mediaLibrarySession: MediaLibrarySession? = null
+    private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
-    private lateinit var settings: SettingsStore
-
-    private val librarySessionCallback = object : MediaLibrarySession.Callback {
-        override fun onGetLibraryRoot(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            params: MediaLibraryService.LibraryParams?
-        ): ListenableFuture<LibraryResult<MediaItem>> {
-            val rootItem = MediaItem.Builder()
-                .setMediaId(MEDIA_ID_ROOT)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setIsBrowsable(true)
-                        .setIsPlayable(false)
-                        .setTitle("SoundWave")
-                        .build()
-                )
-                .build()
-            return Futures.immediateFuture(LibraryResult.ofItem(rootItem, params))
-        }
-
-        override fun onGetChildren(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            parentId: String,
-            page: Int,
-            pageSize: Int,
-            params: MediaLibraryService.LibraryParams?
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val items = when (parentId) {
-                MEDIA_ID_ROOT -> {
-                    listOf(
-                        buildBrowseFolder(MEDIA_ID_HISTORY, "Nedávno prehrávané"),
-                        buildBrowseFolder(MEDIA_ID_QUEUE, "Aktuálny zoznam (Fronta)"),
-                        buildBrowseFolder(MEDIA_ID_FAVORITES, "Rýchly výber (Navidrome)")
-                    )
-                }
-                MEDIA_ID_HISTORY -> {
-                    settings.loadHistory().map { track ->
-                        MediaItem.Builder()
-                            .setMediaId(track.id)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(track.title)
-                                    .setArtist(track.artist)
-                                    .setAlbumTitle(track.album)
-                                    .setIsPlayable(true)
-                                    .setIsBrowsable(false)
-                                    .build()
-                            )
-                            .build()
-                    }
-                }
-                MEDIA_ID_QUEUE -> {
-                    settings.loadLastQueue().map { track ->
-                        MediaItem.Builder()
-                            .setMediaId(track.id)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(track.title)
-                                    .setArtist(track.artist)
-                                    .setAlbumTitle(track.album)
-                                    .setIsPlayable(true)
-                                    .setIsBrowsable(false)
-                                    .build()
-                            )
-                            .build()
-                    }
-                }
-                else -> emptyList()
-            }
-            return Futures.immediateFuture(
-                LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
-            )
-        }
-
-        override fun onGetItem(
-            session: MediaLibrarySession,
-            browser: MediaSession.ControllerInfo,
-            mediaId: String
-        ): ListenableFuture<LibraryResult<MediaItem>> {
-            val track = settings.loadLastTrack()
-            val item = if (track != null && track.id == mediaId) {
-                MediaItem.Builder()
-                    .setMediaId(track.id)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(track.title)
-                            .setArtist(track.artist)
-                            .setIsPlayable(true)
-                            .build()
-                    )
-                    .build()
-            } else {
-                MediaItem.Builder()
-                    .setMediaId(mediaId)
-                    .setMediaMetadata(MediaMetadata.Builder().setIsPlayable(true).build())
-                    .build()
-            }
-            return Futures.immediateFuture(LibraryResult.ofItem(item, null))
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
-        settings = SettingsStore(this)
 
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(
@@ -161,7 +53,7 @@ class PlaybackService : MediaLibraryService() {
                 }
             })
         } catch (_: Throwable) {
-            // Some TV platforms or audio sinks do not support hardware AudioEffects
+            // Safe fallback if hardware DSP is unavailable
         }
 
         // Keep widget in sync with playback state
@@ -182,7 +74,7 @@ class PlaybackService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        mediaLibrarySession = MediaLibrarySession.Builder(this, player, librarySessionCallback)
+        mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(openAppIntent)
             .build()
     }
@@ -227,23 +119,10 @@ class PlaybackService : MediaLibraryService() {
         SoundWaveWidgetProvider.updateWidgetState(this, title, artist, player.isPlaying)
     }
 
-    private fun buildBrowseFolder(id: String, title: String): MediaItem {
-        return MediaItem.Builder()
-            .setMediaId(id)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setIsBrowsable(true)
-                    .setIsPlayable(false)
-                    .build()
-            )
-            .build()
-    }
-
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaLibrarySession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val p = mediaLibrarySession?.player
+        val p = mediaSession?.player
         if (p == null || !p.playWhenReady || p.mediaItemCount == 0) {
             stopSelf()
         }
@@ -251,18 +130,11 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         AudioEffectsManager.releaseEffects()
-        mediaLibrarySession?.run {
+        mediaSession?.run {
             player.release()
             release()
         }
-        mediaLibrarySession = null
+        mediaSession = null
         super.onDestroy()
-    }
-
-    companion object {
-        const val MEDIA_ID_ROOT = "root"
-        const val MEDIA_ID_HISTORY = "history"
-        const val MEDIA_ID_QUEUE = "queue"
-        const val MEDIA_ID_FAVORITES = "favorites"
     }
 }

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.soundwave.nctrn"
     minSdk = 24
     targetSdk = 36
-    versionCode = 15
-    versionName = "6.0"
+    versionCode = 16
+    versionName = "6.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
