@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/app_name"
-    android:initialKeyguardLayout="@layout/soundwave_widget_layout"
-    android:initialLayout="@layout/soundwave_widget_layout"
     android:minWidth="240dp"
     android:minHeight="90dp"
-    android:previewImage="@drawable/tv_banner"
-    android:resizeMode="horizontal|vertical"
-    android:targetCellWidth="3"
-    android:targetCellHeight="2"
     android:updatePeriodMillis="0"
-    android:widgetCategory="home_screen|keyguard" />
+    android:initialLayout="@layout/soundwave_widget_layout"
+    android:previewImage="@drawable/tv_banner"
+    android:resizeMode="vertical|horizontal"
+    android:initialKeyguardLayout="@layout/soundwave_widget_layout"
+    android:widgetCategory="keyguard|home_screen"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"/>

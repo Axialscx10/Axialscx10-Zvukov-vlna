@@ -121,7 +121,8 @@ data class HeadphoneProfile(
     val targetInfo: String,
     val preampDb: String,
     val filtersSpec: String,
-    val impedanceSpec: String
+    val impedanceSpec: String,
+    val eqBands: List<Float> = List(10) { 0f }
 )
 
 /** Static reference data for the equalizer / AutoEQ screens (these screens are still UI only). */
@@ -141,6 +142,7 @@ object SoundWaveCatalog {
     )
 
     val eqPresets: Map<String, List<Float>> = linkedMapOf(
+        "Power Metal / Heavy Metal" to listOf(3.5f, 4.5f, 2.0f, -2.0f, -1.5f, 1.5f, 3.5f, 4.0f, 3.0f, 2.5f),
         "Synthwave / Retrowave" to listOf(4.5f, 3.0f, 1.5f, 0.0f, -1.5f, -1.0f, 1.0f, 2.5f, 4.0f, 5.0f),
         "Elektronika & Bass Boost" to listOf(6.0f, 5.0f, 3.5f, 1.0f, -0.5f, 0.0f, 1.5f, 3.0f, 4.5f, 4.0f),
         "Audiofil Flat (Referenčný)" to listOf(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f),
@@ -151,12 +153,22 @@ object SoundWaveCatalog {
     // AutoEQ Headphone Profiles
     val headphoneProfiles = listOf(
         HeadphoneProfile(
+            id = "denon_perl_pro",
+            name = "Denon PerL Pro",
+            targetInfo = "Harman In-Ear 2019 • SoundGuys & Crinacle meranie (Masimo AAT)",
+            preampDb = "-5.5 dB",
+            filtersSpec = "10 PEQ",
+            impedanceSpec = "32 Ω • ANC TWS",
+            eqBands = listOf(-1.0f, -2.5f, -3.0f, -1.5f, 0.5f, 1.5f, 2.5f, 4.0f, -1.5f, 1.5f)
+        ),
+        HeadphoneProfile(
             id = "hd600",
             name = "Sennheiser HD 600",
             targetInfo = "Harman Target v2 • Oratory1990 meranie",
             preampDb = "-4.8 dB",
             filtersSpec = "10 PEQ",
-            impedanceSpec = "300 Ω"
+            impedanceSpec = "300 Ω",
+            eqBands = listOf(5.0f, 3.5f, 0.5f, -1.5f, -0.5f, 0.0f, -1.0f, 1.5f, 2.0f, 1.5f)
         ),
         HeadphoneProfile(
             id = "hd650",
@@ -164,7 +176,8 @@ object SoundWaveCatalog {
             targetInfo = "Harman Target v2 • Crinacle meranie",
             preampDb = "-5.2 dB",
             filtersSpec = "10 PEQ",
-            impedanceSpec = "300 Ω"
+            impedanceSpec = "300 Ω",
+            eqBands = listOf(5.5f, 3.0f, -0.5f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 1.5f, 2.5f)
         ),
         HeadphoneProfile(
             id = "hd800s",
@@ -172,7 +185,8 @@ object SoundWaveCatalog {
             targetInfo = "Harman Target • Oratory1990 meranie",
             preampDb = "-6.1 dB",
             filtersSpec = "High-End Open Back",
-            impedanceSpec = "300 Ω"
+            impedanceSpec = "300 Ω",
+            eqBands = listOf(6.0f, 4.0f, 1.5f, -1.0f, 0.0f, 1.0f, 2.5f, 1.0f, -3.5f, 1.0f)
         ),
         HeadphoneProfile(
             id = "hd560s",
@@ -180,7 +194,8 @@ object SoundWaveCatalog {
             targetInfo = "Harman Over-Ear Target • Referenčný profil",
             preampDb = "-3.5 dB",
             filtersSpec = "10 PEQ",
-            impedanceSpec = "120 Ω"
+            impedanceSpec = "120 Ω",
+            eqBands = listOf(3.5f, 2.0f, 0.0f, -1.0f, 0.0f, 0.5f, -1.5f, -2.5f, 1.0f, 1.5f)
         ),
         HeadphoneProfile(
             id = "wh1000xm5",
@@ -188,7 +203,8 @@ object SoundWaveCatalog {
             targetInfo = "Bluetooth ANC • Harman Target (Oratory1990)",
             preampDb = "-4.0 dB",
             filtersSpec = "Vypnutý interný EQ",
-            impedanceSpec = "48 Ω"
+            impedanceSpec = "48 Ω",
+            eqBands = listOf(-2.0f, -3.5f, -4.0f, -2.5f, 0.0f, 1.5f, 3.0f, 2.5f, 1.5f, 2.0f)
         )
     )
 }

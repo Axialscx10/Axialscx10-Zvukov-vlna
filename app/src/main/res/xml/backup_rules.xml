@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 and older: do not back up the saved server login (token) to the cloud. -->
 <full-backup-content>
-    <exclude domain="sharedpref" path="soundwave_prefs.xml" />
+    <exclude
+        domain="sharedpref"
+        path="soundwave_prefs.xml"/>
 </full-backup-content>

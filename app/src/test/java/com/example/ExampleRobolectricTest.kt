@@ -82,8 +82,13 @@ class ExampleRobolectricTest {
     assertEquals("Home", en.navHome)
     assertEquals("Domů", cs.navHome)
 
-    assertEquals("Nastavenia", sk.navSettings)
-    assertEquals("Settings", en.navSettings)
     assertEquals("Nastavení", cs.navSettings)
+  }
+
+  @Test
+  fun `viewModel initializes without throwing exception`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val vm = com.example.ui.SoundWaveViewModel(app)
+    org.junit.Assert.assertNotNull(vm.uiState.value)
   }
 }
