@@ -98,7 +98,7 @@ data class SoundWaveUiState(
 
     // Home
     val homeFilter: String = "Všetko",
-    val homeGenres: List<String> = emptyList(),
+    val homeGenres: List<String> = listOf("Power Metal", "Heavy Metal", "Synthwave", "Rock", "Electronic", "Ambient", "Jazz", "Classical"),
     val homeQuickPicks: List<TrackItem> = emptyList(),
     val homeListenAgain: List<AlbumItem> = emptyList(),
     val homeNewest: List<AlbumItem> = emptyList(),
@@ -113,7 +113,7 @@ data class SoundWaveUiState(
     val searchResult: SearchResult = SearchResult(emptyList(), emptyList(), emptyList()),
     val exploreLoading: Boolean = false,
     val exploreError: String? = null,
-    val genres: List<GenreItem> = emptyList(),
+    val genres: List<GenreItem> = listOf(GenreItem("Power Metal", 0)),
     val lastSyncTime: String = "Knižnica sa načíta zo servera",
     val isScanningServer: Boolean = false,
 
@@ -131,18 +131,18 @@ data class SoundWaveUiState(
     val libraryLoading: Boolean = false,
     val libraryError: String? = null,
 
-    // Equalizer & DSP State (UI only for now, audio is not processed yet)
+    // Equalizer & DSP State
     val eqMasterEnabled: Boolean = true,
-    val preampDb: Float = -1.5f,
-    val eqBands: List<Float> = SoundWaveCatalog.eqPresets["Synthwave / Retrowave"]!!,
-    val activePresetName: String = "Synthwave / Retrowave",
+    val preampDb: Float = -5.5f,
+    val eqBands: List<Float> = SoundWaveCatalog.headphoneProfiles[0].eqBands,
+    val activePresetName: String = "Power Metal / Heavy Metal",
     val subBassBoostDb: Float = 3.5f,
     val crossfeedEnabled: Boolean = true,
     val autoGainEnabled: Boolean = true,
 
     // AutoEQ Headphone Calibration State
-    val autoEqSearchQuery: String = "Sennheiser HD",
-    val autoEqTargetCurve: String = "Harman Target 2019v2",
+    val autoEqSearchQuery: String = "",
+    val autoEqTargetCurve: String = "Harman In-Ear 2019",
     val selectedHeadphone: HeadphoneProfile = SoundWaveCatalog.headphoneProfiles[0],
     val calibrationDryWetPct: Float = 100f,
     val autoPreampEnabled: Boolean = true,
@@ -564,14 +564,19 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val genresLoaded = genreList.await()
                 val plsLoaded = pls.await()
                 _uiState.update { st ->
+                    val mergedHomeGenres = (listOf("Power Metal") + genresLoaded.map { it.name }).distinct().take(9)
+                    val hasPowerMetal = genresLoaded.any { it.name.equals("Power Metal", ignoreCase = true) }
+                    val mergedGenres = if (genresLoaded.isNotEmpty()) {
+                        if (hasPowerMetal) genresLoaded else listOf(GenreItem("Power Metal", 0)) + genresLoaded
+                    } else st.genres
                     st.copy(
                         homeLoading = false,
                         homeError = null,
                         homeQuickPicks = pickList,
                         homeListenAgain = againList,
                         homeNewest = freshList,
-                        genres = if (genresLoaded.isNotEmpty()) genresLoaded else st.genres,
-                        homeGenres = if (genresLoaded.isNotEmpty()) genresLoaded.take(8).map { it.name } else st.homeGenres,
+                        genres = mergedGenres,
+                        homeGenres = if (genresLoaded.isNotEmpty()) mergedHomeGenres else st.homeGenres,
                         libraryPlaylists = plsLoaded ?: st.libraryPlaylists
                     )
                 }
@@ -1226,6 +1231,9 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setExploreCategory(category: String) {
         _uiState.update { it.copy(exploreCategory = category) }
+        if (category == "Power Metal") {
+            setSearchQuery("Power Metal")
+        }
     }
 
     fun toggleAudiophileFilter(filter: String) {
@@ -1362,7 +1370,30 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     // AutoEQ Modal
     fun setAutoEqSearchQuery(query: String) {
-        _uiState.update { it.copy(autoEqSearchQuery = query) }
+        val q = query.trim()
+        val matched = if (q.length >= 2) {
+            SoundWaveCatalog.headphoneProfiles.firstOrNull {
+                it.name.contains(q, ignoreCase = true) ||
+                    it.targetInfo.contains(q, ignoreCase = true) ||
+                    it.id.contains(q, ignoreCase = true)
+            }
+        } else null
+        _uiState.update { st ->
+            if (matched != null) {
+                val targetCurve = if (matched.targetInfo.contains("In-Ear", ignoreCase = true)) {
+                    "Harman In-Ear 2019"
+                } else {
+                    "Harman Target 2019v2"
+                }
+                st.copy(
+                    autoEqSearchQuery = query,
+                    selectedHeadphone = matched,
+                    autoEqTargetCurve = targetCurve
+                )
+            } else {
+                st.copy(autoEqSearchQuery = query)
+            }
+        }
     }
 
     fun setAutoEqTargetCurve(target: String) {
@@ -1370,7 +1401,29 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectHeadphoneProfile(profile: HeadphoneProfile) {
-        _uiState.update { it.copy(selectedHeadphone = profile) }
+        val targetCurve = if (profile.targetInfo.contains("In-Ear", ignoreCase = true)) {
+            "Harman In-Ear 2019"
+        } else {
+            "Harman Target 2019v2"
+        }
+        val preampVal = profile.preampDb.replace("dB", "").trim().toFloatOrNull() ?: -5.5f
+        val state = _uiState.value
+        val scale = (state.calibrationDryWetPct / 100f).coerceIn(0f, 1f)
+        val calibratedBands = profile.eqBands.map { db ->
+            val v = db * scale
+            (Math.round(v * 2f) / 2f).coerceIn(-12f, 12f)
+        }
+        val finalPreamp = if (state.autoPreampEnabled) preampVal else state.preampDb
+        _uiState.update {
+            it.copy(
+                selectedHeadphone = profile,
+                autoEqTargetCurve = targetCurve,
+                eqBands = calibratedBands,
+                preampDb = finalPreamp,
+                activePresetName = "AutoEQ: ${profile.name}"
+            )
+        }
+        AudioEffectsManager.setBands(calibratedBands, finalPreamp)
     }
 
     fun setCalibrationDryWet(pct: Float) {
@@ -1386,15 +1439,25 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun applyAutoEqProfileToDsp() {
-        val profile = _uiState.value.selectedHeadphone
-        val preampVal = profile.preampDb.replace("dB", "").trim().toFloatOrNull() ?: -4.8f
+        val state = _uiState.value
+        val profile = state.selectedHeadphone
+        val preampVal = profile.preampDb.replace("dB", "").trim().toFloatOrNull() ?: -5.5f
+        val scale = (state.calibrationDryWetPct / 100f).coerceIn(0f, 1f)
+        val calibratedBands = profile.eqBands.map { db ->
+            val v = db * scale
+            (Math.round(v * 2f) / 2f).coerceIn(-12f, 12f)
+        }
+        val finalPreamp = if (state.autoPreampEnabled) preampVal else state.preampDb
         _uiState.update {
             it.copy(
-                preampDb = if (it.autoPreampEnabled) preampVal else it.preampDb,
+                eqBands = calibratedBands,
+                preampDb = finalPreamp,
+                activePresetName = "AutoEQ: ${profile.name}",
                 showAutoEqModal = false
             )
         }
-        AudioEffectsManager.setBands(_uiState.value.eqBands, if (_uiState.value.autoPreampEnabled) preampVal else _uiState.value.preampDb)
+        AudioEffectsManager.setBands(calibratedBands, finalPreamp)
+        showMessage("Kalibračný profil „${profile.name}“ (${profile.preampDb}) bol aplikovaný do zvuku.")
     }
 
     // ---------------------------------------------------------------------------------------------

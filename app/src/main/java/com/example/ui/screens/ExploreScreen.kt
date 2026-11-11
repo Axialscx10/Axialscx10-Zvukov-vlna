@@ -120,7 +120,7 @@ fun ExploreScreen(
     onServerStatusClick: () -> Unit,
     onTrackMenu: (TrackItem) -> Unit = {}
 ) {
-    val categories = listOf("Všetko", "Skladby", "Interpreti", "Albumy", "Playlisty", "Žánre")
+    val categories = listOf("Všetko", "Power Metal", "Skladby", "Interpreti", "Albumy", "Playlisty", "Žánre")
     val content = uiState.exploreContent()
     val query = uiState.searchQuery.trim()
     val isSearching = query.isNotEmpty()
@@ -132,7 +132,7 @@ fun ExploreScreen(
         uiState.genres.filter { it.name.contains(query, ignoreCase = true) }
     } else uiState.genres.take(24)
 
-    fun show(category: String) = uiState.exploreCategory == "Všetko" || uiState.exploreCategory == category
+    fun show(category: String) = uiState.exploreCategory == "Všetko" || uiState.exploreCategory == "Power Metal" || uiState.exploreCategory == category
 
     val topArtist = if (isSearching && show("Interpreti")) content.artists.firstOrNull() else null
     val nothingFound = isSearching && !uiState.exploreLoading &&

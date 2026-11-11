@@ -560,6 +560,7 @@ fun EqualizerScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         val presetIcons = mapOf(
+                            "Power Metal / Heavy Metal" to Icons.Default.ElectricBolt,
                             "Synthwave / Retrowave" to Icons.Default.GraphicEq,
                             "Elektronika & Bass Boost" to Icons.Default.ElectricBolt,
                             "Audiofil Flat (Referenčný)" to Icons.Default.Straighten,
@@ -693,7 +694,7 @@ fun EqualizerScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "AutoEq Harman Target V2 • Kalibrované",
+                                    text = "${uiState.selectedHeadphone.targetInfo} • Pre-amp ${uiState.selectedHeadphone.preampDb}",
                                     color = OnSurfaceVariant,
                                     fontSize = 11.sp,
                                     maxLines = 1,
@@ -1251,7 +1252,19 @@ private fun AutoEqCalibrationModalOverlay(
                                 fontSize = 14.sp
                             ),
                             cursorBrush = SolidColor(Primary),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { innerTextField ->
+                                if (uiState.autoEqSearchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Hľadaj slúchadlá (napr. Denon PerL Pro, Sennheiser…)",
+                                        color = OnSurfaceVariant.copy(alpha = 0.6f),
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                innerTextField()
+                            }
                         )
                         Box(
                             modifier = Modifier
@@ -1422,7 +1435,7 @@ private fun AutoEqCalibrationModalOverlay(
                             ) {
                                 Text("20 Hz", color = OnSurfaceVariant.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    text = "Oratory1990 Korekčná Krivka (+4.2dB / -5.1dB)",
+                                    text = if (active.id == "denon_perl_pro") "Harman In-Ear 2019 Kompenzácia (Pre-amp -5.5 dB)" else "Oratory1990 Korekčná Krivka (+4.2dB / -5.1dB)",
                                     color = Primary,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold
@@ -1477,8 +1490,17 @@ private fun AutoEqCalibrationModalOverlay(
                         }
                     }
 
-                    // Other Headphone Profiles
-                    SoundWaveCatalog.headphoneProfiles.filter { it.id != active.id }.forEach { profile ->
+                    // Other Headphone Profiles (filtered by search query)
+                    val query = uiState.autoEqSearchQuery.trim()
+                    val filteredOtherProfiles = SoundWaveCatalog.headphoneProfiles.filter { profile ->
+                        profile.id != active.id && (
+                            query.isBlank() ||
+                                profile.name.contains(query, ignoreCase = true) ||
+                                profile.targetInfo.contains(query, ignoreCase = true) ||
+                                profile.id.contains(query, ignoreCase = true)
+                            )
+                    }
+                    filteredOtherProfiles.forEach { profile ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

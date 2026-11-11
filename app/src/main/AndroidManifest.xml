@@ -42,7 +42,7 @@
         android:localeConfig="@xml/locales_config"
         android:theme="@style/Theme.MyApplication">
         <activity
-            android:name=".MainActivity"
+            android:name="com.example.MainActivity"
             android:banner="@drawable/tv_banner"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize"
             android:exported="true"
@@ -59,14 +59,14 @@
 
         <!-- Home Screen Material You Widget Provider -->
         <receiver
-            android:name=".widget.SoundWaveWidgetProvider"
+            android:name="com.example.widget.SoundWaveWidgetProvider"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.soundwave.widget.ACTION_PLAY_PAUSE" />
-                <action android:name="com.example.soundwave.widget.ACTION_PREV" />
-                <action android:name="com.example.soundwave.widget.ACTION_NEXT" />
-                <action android:name="com.example.soundwave.widget.ACTION_UPDATE_STATE" />
+                <action android:name="com.example.widget.PLAY_PAUSE" />
+                <action android:name="com.example.widget.PREV" />
+                <action android:name="com.example.widget.NEXT" />
+                <action android:name="com.example.widget.UPDATE_STATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -74,7 +74,7 @@
         </receiver>
 
         <service
-            android:name=".playback.PlaybackService"
+            android:name="com.example.playback.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
