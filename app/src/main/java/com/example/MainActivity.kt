@@ -350,7 +350,9 @@ fun SoundWaveApp(
                                 onTrackLikeToggle = { viewModel.toggleTrackLike(it) },
                                 onOpenExplore = { viewModel.navigateTo(AppScreen.EXPLORE) },
                                 onOpenStreamingSettings = { viewModel.navigateTo(AppScreen.UPGRADE_STREAMING) },
-                                onOpenTrackMenu = { viewModel.setTrackMenuTarget(it) }
+                                onOpenTrackMenu = { viewModel.setTrackMenuTarget(it) },
+                                onAlbumClick = { viewModel.openCollection(it.id, fallbackName = it.title) },
+                                onArtistClick = { viewModel.openArtistForTrack(it) }
                             )
                         }
                         AppScreen.NOW_PLAYING -> {
@@ -366,10 +368,9 @@ fun SoundWaveApp(
                                 onTabSelected = { viewModel.setNowPlayingTab(it) },
                                 onLyricLineClick = { viewModel.setActiveLyricIndex(it) },
                                 onOpenEqualizer = { viewModel.navigateTo(AppScreen.EQUALIZER) },
-                                onOpenArtistDetail = {
-                                    val artistId = uiState.currentTrack.artistId
-                                    if (artistId.isNotBlank()) viewModel.openCollection("ar:$artistId")
-                                },
+                                onOpenArtistDetail = { viewModel.openArtistForTrack(uiState.currentTrack) },
+                                onOpenAlbumDetail = { viewModel.openAlbumForTrack(uiState.currentTrack) },
+                                onOpenTrackArtist = { viewModel.openArtistForTrack(it) },
                                 onOpenStreamingSettings = { viewModel.navigateTo(AppScreen.UPGRADE_STREAMING) },
                                 onQueueItemClick = { viewModel.playQueueIndex(it) },
                                 onRelatedClick = { track ->
@@ -489,6 +490,7 @@ fun SoundWaveApp(
                     onNextClick = { viewModel.skipToNextTrack() },
                     onPreviousClick = { viewModel.skipToPreviousTrack() },
                     onCastClick = { viewModel.navigateTo(AppScreen.UPGRADE_STREAMING) },
+                    onOpenArtistClick = { viewModel.openArtistForTrack(track) },
                     onDismiss = { viewModel.dismissMiniPlayer() },
                     modifier = if (!isMainTabScreen) {
                         Modifier.windowInsetsPadding(WindowInsets.navigationBars)
@@ -569,7 +571,9 @@ fun SoundWaveApp(
                     context.startActivity(
                         android.content.Intent.createChooser(sendIntent, "Zdieľať skladbu")
                     )
-                }
+                },
+                onOpenArtist = { viewModel.openArtistForTrack(track) },
+                onOpenAlbum = { viewModel.openAlbumForTrack(track) }
             )
         }
 

@@ -104,6 +104,7 @@ data class CollectionDetail(
     val coverUrl: String,
     val metaLine: String,
     val tracks: List<TrackItem>,
+    val albums: List<AlbumItem> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null
 )

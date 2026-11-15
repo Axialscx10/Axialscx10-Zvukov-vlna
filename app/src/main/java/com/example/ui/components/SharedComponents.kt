@@ -9,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +84,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -540,6 +543,7 @@ fun GlassMiniPlayerDock(
     onNextClick: () -> Unit,
     onPreviousClick: () -> Unit = {},
     onCastClick: () -> Unit = {},
+    onOpenArtistClick: (() -> Unit)? = null,
     onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -638,20 +642,41 @@ fun GlassMiniPlayerDock(
 
                     Text(
                         text = subtitleVariant.ifBlank { formatTrackSubtitle(track.artist, track.album, track.title) },
-                        color = OnSurfaceVariant,
+                        color = SecondaryFixed,
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (onOpenArtistClick != null) {
+                            Modifier.clickable { onOpenArtistClick() }
+                        } else {
+                            Modifier
+                        }
                     )
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // Controls: Play/Pause, Next, and Dismiss ("X")
+                // Controls: Artist Jump, Play/Pause, Next, and Dismiss ("X")
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    if (onOpenArtistClick != null) {
+                        IconButton(
+                            onClick = onOpenArtistClick,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("mini_player_open_artist")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Prejsť na interpreta",
+                                tint = SecondaryFixed,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
                     // Play / Pause Button
                     Box(
                         modifier = Modifier
@@ -691,6 +716,7 @@ fun GlassMiniPlayerDock(
                         onClick = onDismiss,
                         modifier = Modifier
                             .size(32.dp)
+                            .focusProperties { canFocus = false }
                             .testTag("mini_player_dismiss")
                     ) {
                         Icon(
@@ -992,8 +1018,13 @@ fun TrackActionsBottomSheet(
     onDownload: () -> Unit,
     onDeleteDownload: () -> Unit,
     onToggleLike: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onOpenArtist: (() -> Unit)? = null,
+    onOpenAlbum: (() -> Unit)? = null
 ) {
+    val cleanArtist = com.example.data.cleanArtistName(track.artist).ifBlank { "Neznámy interpret" }
+    val cleanAlbum = com.example.data.cleanAlbumName(track.album)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -1003,6 +1034,7 @@ fun TrackActionsBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1013,6 +1045,10 @@ fun TrackActionsBottomSheet(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(SurfaceContainer)
+                    .clickable(enabled = onOpenArtist != null) {
+                        onOpenArtist?.invoke()
+                        onDismiss()
+                    }
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1040,7 +1076,7 @@ fun TrackActionsBottomSheet(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${track.artist} • ${track.album.ifBlank { "Navidrome" }}",
+                        text = "$cleanArtist • ${cleanAlbum.ifBlank { "Navidrome" }}",
                         color = OnSurfaceVariant,
                         fontSize = 12.sp,
                         maxLines = 1,
@@ -1059,6 +1095,32 @@ fun TrackActionsBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(4.dp))
+
+            if (onOpenArtist != null) {
+                TrackActionRow(
+                    icon = Icons.Default.Person,
+                    title = "Prejsť na interpreta: $cleanArtist",
+                    subtitle = "Zobraziť všetky albumy a skladby kapely / interpreta",
+                    iconTint = SecondaryFixed,
+                    onClick = {
+                        onOpenArtist()
+                        onDismiss()
+                    }
+                )
+            }
+
+            if (onOpenAlbum != null && cleanAlbum.isNotBlank()) {
+                TrackActionRow(
+                    icon = Icons.Default.Album,
+                    title = "Prejsť na album: $cleanAlbum",
+                    subtitle = "Otvoriť celý album tejto skladby",
+                    iconTint = PrimaryContainer,
+                    onClick = {
+                        onOpenAlbum()
+                        onDismiss()
+                    }
+                )
+            }
 
             // Actions
             TrackActionRow(

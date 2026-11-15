@@ -182,8 +182,136 @@ class SubsonicApi(
         )
     }
 
+    @Volatile
+    private var cachedTrackPool: List<TrackItem>? = null
+
+    @Volatile
+    private var cachedAlbumPool: List<AlbumItem>? = null
+
+    @Volatile
+    private var cachedRawGenres: List<GenreItem>? = null
+
+    private suspend fun rawGenres(): List<GenreItem> {
+        cachedRawGenres?.let { if (it.isNotEmpty()) return it }
+        val r = call("getGenres")
+        val list = r.optJSONObject("genres")?.arr("genre").orEmpty()
+            .map { GenreItem(it.optString("value").trim(), it.optInt("songCount")) }
+            .filter { it.name.isNotBlank() }
+            .sortedByDescending { it.songCount }
+        if (list.isNotEmpty()) cachedRawGenres = list
+        return list
+    }
+
+    /**
+     * Loads and caches up to 3,500 tracks from the server in parallel so smart genres can rescue
+     * songs that were tagged simply as "Rock" or left untagged in their ID3 metadata.
+     */
+    suspend fun getOrLoadCatalogPool(): List<TrackItem> = coroutineScope {
+        cachedTrackPool?.let { if (it.isNotEmpty()) return@coroutineScope it }
+        val raw = try { rawGenres() } catch (_: Exception) { emptyList() }
+
+        // 1. Try OpenSubsonic / Navidrome search3 with empty query across 6 parallel pages (3,000 songs)
+        val searchPages = (0 until 6).map { pageIdx ->
+            async {
+                try {
+                    val r = call(
+                        "search3",
+                        listOf(
+                            "query" to "",
+                            "artistCount" to "0",
+                            "albumCount" to "0",
+                            "songCount" to "500",
+                            "songOffset" to (pageIdx * 500).toString()
+                        )
+                    )
+                    r.optJSONObject("searchResult3")?.arr("song").orEmpty().map(::songFrom)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }.awaitAll().flatten()
+
+        // 2. Also pull from the top largest genre(s) (like "Rock") if search3 returned fewer tracks
+        val topGenre = raw.firstOrNull()
+        val rockPages = if (topGenre != null && searchPages.size < topGenre.songCount.coerceAtMost(2500)) {
+            val pagesNeeded = ((topGenre.songCount.coerceAtMost(3000) + 499) / 500).coerceIn(1, 6)
+            (0 until pagesNeeded).map { pageIdx ->
+                async {
+                    try {
+                        val r = call(
+                            "getSongsByGenre",
+                            listOf(
+                                "genre" to topGenre.name,
+                                "count" to "500",
+                                "offset" to (pageIdx * 500).toString()
+                            )
+                        )
+                        r.optJSONObject("songsByGenre")?.arr("song").orEmpty().map(::songFrom)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }.awaitAll().flatten()
+        } else {
+            emptyList()
+        }
+
+        val combined = (searchPages + rockPages).distinctBy { it.id }
+        if (combined.isNotEmpty()) {
+            cachedTrackPool = combined
+        }
+        combined
+    }
+
+    suspend fun getOrLoadAlbumsPool(): List<AlbumItem> = coroutineScope {
+        cachedAlbumPool?.let { if (it.isNotEmpty()) return@coroutineScope it }
+        val pages = (0 until 4).map { pageIdx ->
+            async {
+                try {
+                    val r = call(
+                        "getAlbumList2",
+                        listOf(
+                            "type" to "alphabeticalByName",
+                            "size" to "500",
+                            "offset" to (pageIdx * 500).toString()
+                        )
+                    )
+                    r.optJSONObject("albumList2")?.arr("album").orEmpty().map(::albumFrom)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }.awaitAll().flatten().distinctBy { it.id }
+        if (pages.isNotEmpty()) {
+            cachedAlbumPool = pages
+        }
+        pages
+    }
+
     /** type: newest, recent, frequent, random, alphabeticalByName, byGenre... */
-    suspend fun albumList(type: String, size: Int = 30, offset: Int = 0, genre: String? = null): List<AlbumItem> {
+    suspend fun albumList(
+        type: String,
+        size: Int = 30,
+        offset: Int = 0,
+        genre: String? = null,
+        allowSmartFallback: Boolean = true
+    ): List<AlbumItem> {
+        if (type == "byGenre" && !genre.isNullOrBlank()) {
+            val spec = if (allowSmartFallback) SmartGenreCatalog.findSpec(genre) else null
+            val direct = try {
+                val params = listOf("type" to type, "size" to size.toString(), "offset" to offset.toString(), "genre" to genre)
+                val r = call("getAlbumList2", params)
+                r.optJSONObject("albumList2")?.arr("album").orEmpty().map(::albumFrom)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (spec != null && direct.size < size && offset == 0) {
+                val poolAlbums = try { getOrLoadAlbumsPool() } catch (_: Exception) { emptyList() }
+                val matched = poolAlbums.filter { SmartGenreCatalog.matchesAlbum(it, spec) }
+                return (direct + matched).distinctBy { it.id }.take(size)
+            }
+            return direct
+        }
         val params = mutableListOf("type" to type, "size" to size.toString(), "offset" to offset.toString())
         if (!genre.isNullOrBlank()) params += "genre" to genre
         val r = call("getAlbumList2", params)
@@ -191,8 +319,22 @@ class SubsonicApi(
     }
 
     suspend fun randomSongs(size: Int = 40, genre: String? = null): List<TrackItem> {
+        if (!genre.isNullOrBlank()) {
+            val spec = SmartGenreCatalog.findSpec(genre)
+            val direct = try {
+                val r = call("getRandomSongs", listOf("size" to size.toString(), "genre" to genre))
+                r.optJSONObject("randomSongs")?.arr("song").orEmpty().map(::songFrom)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (spec != null && direct.size < size) {
+                val pool = try { getOrLoadCatalogPool() } catch (_: Exception) { emptyList() }
+                val matched = pool.filter { SmartGenreCatalog.matchesTrack(it, spec) }.shuffled()
+                return (direct + matched).distinctBy { it.id }.take(size)
+            }
+            return direct
+        }
         val params = mutableListOf("size" to size.toString())
-        if (!genre.isNullOrBlank()) params += "genre" to genre
         val r = call("getRandomSongs", params)
         return r.optJSONObject("randomSongs")?.arr("song").orEmpty().map(::songFrom)
     }
@@ -208,11 +350,44 @@ class SubsonicApi(
         return r.optJSONObject("playlists")?.arr("playlist").orEmpty().map(::playlistFrom)
     }
 
-    suspend fun genres(): List<GenreItem> {
-        val r = call("getGenres")
-        return r.optJSONObject("genres")?.arr("genre").orEmpty()
-            .map { GenreItem(it.optString("value"), it.optInt("songCount")) }
-            .filter { it.name.isNotBlank() }
+    /**
+     * Returns an enriched list of genres combining Smart Genres (populated from both server tags
+     * and artist/album/title/year classification of the catalog pool) with raw server genres.
+     */
+    suspend fun genres(): List<GenreItem> = coroutineScope {
+        val rawDef = async { rawGenres() }
+        val poolDef = async { try { getOrLoadCatalogPool() } catch (_: Exception) { emptyList() } }
+        val raw = rawDef.await()
+        val pool = poolDef.await()
+
+        val smartItems = SmartGenreCatalog.specs.mapNotNull { spec ->
+            val matchingServerTagNames = SmartGenreCatalog.matchingServerGenres(spec.canonicalName, raw, spec)
+                .map { it.lowercase(Locale.ROOT) }
+                .toSet()
+            val rawTagSum = raw
+                .filter { it.name.trim().lowercase(Locale.ROOT) in matchingServerTagNames }
+                .sumOf { it.songCount }
+            val poolMatches = pool.count { SmartGenreCatalog.matchesTrack(it, spec) }
+            // Estimate total distinct tracks for this smart genre
+            val totalCount = maxOf(rawTagSum, poolMatches, minOf(rawTagSum + poolMatches, pool.size.coerceAtLeast(rawTagSum)))
+            if (totalCount > 0) {
+                GenreItem(spec.canonicalName, totalCount)
+            } else {
+                null
+            }
+        }
+
+        val coveredNames = SmartGenreCatalog.specs.flatMap {
+            it.aliases + it.canonicalName.lowercase(Locale.ROOT)
+        }.toSet()
+
+        val remainingServerGenres = raw.filter { g ->
+            g.name.trim().lowercase(Locale.ROOT) !in coveredNames && g.songCount > 0
+        }
+
+        // Put Smart Genres (sorted by songCount descending) alongside top server genres like Rock
+        (smartItems + remainingServerGenres)
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
             .sortedByDescending { it.songCount }
     }
 
@@ -384,13 +559,14 @@ class SubsonicApi(
         )
     }
 
-    /** Artist page: lists the songs of the artist's albums (up to 20 albums, loaded in parallel). */
+    /** Artist page: lists the artist's albums and songs (up to 20 albums, loaded in parallel). */
     suspend fun artistDetail(rawId: String): CollectionDetail {
         val a = call("getArtist", listOf("id" to rawId)).optJSONObject("artist")
             ?: throw SubsonicException("Interpret sa nenašiel.")
         val albums = a.arr("album")
+        val albumItems = albums.map(::albumFrom)
         val tracks = coroutineScope {
-            albums.take(20).map { al ->
+            albums.take(60).map { al ->
                 async {
                     try {
                         val songs = call("getAlbum", listOf("id" to al.optString("id")))
@@ -410,7 +586,122 @@ class SubsonicApi(
             subtitle = "${albums.size} ${plural(albums.size, "album", "albumy", "albumov")}",
             coverUrl = coverUrl(cover, 800),
             metaLine = metaLine(tracks),
-            tracks = tracks
+            tracks = tracks,
+            albums = albumItems
+        )
+    }
+
+    /**
+     * Resolves an artist by name when a track in a mix/queue has an empty or compilation artistId.
+     * Searches Navidrome for the artist, loads their full discography (albums + tracks) if found,
+     * or builds a collection from all matching albums and songs on the server.
+     */
+    suspend fun artistDetailByName(rawName: String): CollectionDetail {
+        val cleaned = cleanArtistName(rawName).trim()
+        val primary = cleaned
+            .split(Regex("(?i)\\s+(feat\\.?|ft\\.?|with|vs\\.?)\\s+|[,;/&]"))
+            .firstOrNull()?.trim()
+            .orEmpty()
+            .ifBlank { cleaned }
+        val query = primary.ifBlank { rawName.trim() }
+        if (query.isBlank() || query.equals("Neznámy interpret", ignoreCase = true)) {
+            throw SubsonicException("Interpret nie je pri tejto skladbe uvedený.")
+        }
+
+        val sr = search(query, artistCount = 25, albumCount = 50, songCount = 150)
+        val matchedArtist = sr.artists.firstOrNull { it.name.equals(cleaned, ignoreCase = true) }
+            ?: sr.artists.firstOrNull { it.name.equals(primary, ignoreCase = true) }
+            ?: sr.artists.firstOrNull {
+                it.name.contains(primary, ignoreCase = true) || primary.contains(it.name, ignoreCase = true)
+            }
+            ?: sr.artists.firstOrNull()
+
+        if (matchedArtist != null) {
+            val rawId = matchedArtist.id.removePrefix("ar:")
+            if (rawId.isNotBlank()) {
+                try {
+                    val detail = artistDetail(rawId)
+                    if (detail.tracks.isNotEmpty() || detail.albums.isNotEmpty()) {
+                        return detail
+                    }
+                } catch (_: SubsonicException) {
+                    // Fall back to search results below if getArtist fails
+                }
+            }
+        }
+
+        val matchingAlbums = sr.albums.filter {
+            it.subtitle.contains(primary, ignoreCase = true) ||
+                it.title.contains(primary, ignoreCase = true)
+        }.ifEmpty { sr.albums }
+
+        val matchingTracks = sr.tracks.filter {
+            it.artist.contains(primary, ignoreCase = true) ||
+                it.title.contains(primary, ignoreCase = true)
+        }.ifEmpty { sr.tracks }
+
+        if (matchingAlbums.isEmpty() && matchingTracks.isEmpty()) {
+            throw SubsonicException("Pre interpreta „$query“ sa na serveri nenašli žiadne skladby ani albumy.")
+        }
+
+        val displayTitle = matchedArtist?.name ?: cleaned.ifBlank { query }
+        val subtitleText = if (matchingAlbums.isNotEmpty()) {
+            "${matchingAlbums.size} ${plural(matchingAlbums.size, "album", "albumy", "albumov")}"
+        } else {
+            "Skladby interpreta"
+        }
+        val cover = matchedArtist?.imageUrl?.takeIf { it.isNotBlank() }
+            ?: matchingAlbums.firstOrNull()?.imageUrl?.takeIf { it.isNotBlank() }
+            ?: matchingTracks.firstOrNull()?.imageUrl.orEmpty()
+
+        return CollectionDetail(
+            id = "ar_name:$query",
+            kind = "Interpret",
+            title = displayTitle,
+            subtitle = subtitleText,
+            coverUrl = cover,
+            metaLine = metaLine(matchingTracks),
+            tracks = matchingTracks,
+            albums = matchingAlbums
+        )
+    }
+
+    /**
+     * Resolves an album by name when a track in a mix/queue has an empty albumId.
+     */
+    suspend fun albumDetailByName(rawAlbumName: String): CollectionDetail {
+        val cleaned = cleanAlbumName(rawAlbumName).trim().ifBlank { rawAlbumName.trim() }
+        if (cleaned.isBlank()) throw SubsonicException("Názov albumu nie je uvedený.")
+        val sr = search(cleaned, artistCount = 5, albumCount = 25, songCount = 100)
+        val matchedAlbum = sr.albums.firstOrNull { it.title.equals(cleaned, ignoreCase = true) }
+            ?: sr.albums.firstOrNull {
+                it.title.contains(cleaned, ignoreCase = true) || cleaned.contains(it.title, ignoreCase = true)
+            }
+            ?: sr.albums.firstOrNull()
+
+        if (matchedAlbum != null) {
+            val rawId = matchedAlbum.id.removePrefix("al:")
+            if (rawId.isNotBlank()) {
+                return albumDetail(rawId)
+            }
+        }
+
+        val matchingTracks = sr.tracks.filter {
+            it.album.equals(cleaned, ignoreCase = true) || it.album.contains(cleaned, ignoreCase = true)
+        }.ifEmpty { sr.tracks }
+
+        if (matchingTracks.isEmpty()) {
+            throw SubsonicException("Album „$cleaned“ sa na serveri nenašiel.")
+        }
+
+        return CollectionDetail(
+            id = "al_name:$cleaned",
+            kind = "Album",
+            title = cleaned,
+            subtitle = matchingTracks.firstOrNull()?.artist.orEmpty(),
+            coverUrl = matchingTracks.firstOrNull()?.imageUrl.orEmpty(),
+            metaLine = metaLine(matchingTracks),
+            tracks = matchingTracks
         )
     }
 
@@ -427,17 +718,187 @@ class SubsonicApi(
         )
     }
 
-    suspend fun genreDetail(genre: String, count: Int = 100): CollectionDetail {
-        val r = call("getSongsByGenre", listOf("genre" to genre, "count" to count.toString()))
-        val tracks = r.optJSONObject("songsByGenre")?.arr("song").orEmpty().map(::songFrom)
-        return CollectionDetail(
+    suspend fun genreDetail(genre: String, maxTracks: Int = 5000): CollectionDetail = coroutineScope {
+        val spec = SmartGenreCatalog.findSpec(genre)
+        val serverGenres = try { rawGenres() } catch (_: Exception) { emptyList() }
+        val matchingTags = SmartGenreCatalog.matchingServerGenres(genre, serverGenres, spec)
+            .distinctBy { it.lowercase(Locale.ROOT) }
+
+        val tracksByTagDeferred = async {
+            val allSongs = mutableListOf<TrackItem>()
+            for (tag in matchingTags.take(6)) {
+                var offset = 0
+                val pageSize = 500
+                while (offset < maxTracks && allSongs.size < maxTracks) {
+                    val page = try {
+                        val r = call(
+                            "getSongsByGenre",
+                            listOf(
+                                "genre" to tag,
+                                "count" to pageSize.toString(),
+                                "offset" to offset.toString()
+                            )
+                        )
+                        r.optJSONObject("songsByGenre")?.arr("song").orEmpty().map(::songFrom)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    allSongs += page
+                    if (page.size < pageSize) break
+                    offset += pageSize
+                }
+            }
+            allSongs.distinctBy { it.id }
+        }
+
+        val albumsByTagDeferred = async {
+            val allAlbums = mutableListOf<AlbumItem>()
+            for (tag in matchingTags.take(5)) {
+                var offset = 0
+                val pageSize = 500
+                while (offset < 1000 && allAlbums.size < 1500) {
+                    val page = try {
+                        albumList("byGenre", size = pageSize, offset = offset, genre = tag, allowSmartFallback = false)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    allAlbums += page
+                    if (page.size < pageSize) break
+                    offset += pageSize
+                }
+            }
+            allAlbums.distinctBy { it.id }
+        }
+
+        val smartPoolTracksDeferred = async {
+            if (spec != null) {
+                try {
+                    getOrLoadCatalogPool().filter { SmartGenreCatalog.matchesTrack(it, spec) }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+        }
+
+        val smartPoolAlbumsDeferred = async {
+            if (spec != null) {
+                try {
+                    getOrLoadAlbumsPool().filter { SmartGenreCatalog.matchesAlbum(it, spec) }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+        }
+
+        var tracks = (tracksByTagDeferred.await() + smartPoolTracksDeferred.await())
+            .distinctBy { it.id }
+            .take(maxTracks)
+        var apiAlbums = (albumsByTagDeferred.await() + smartPoolAlbumsDeferred.await())
+            .distinctBy { it.id }
+
+        // If a custom non-smart genre returned very few tracks from tags, enrich from catalog pool or search
+        if (spec == null && tracks.size < 25) {
+            try {
+                val normGenre = SmartGenreCatalog.normalize(genre)
+                val rescued = getOrLoadCatalogPool().filter { t ->
+                    SmartGenreCatalog.normalize("${t.artist} ${t.album} ${t.title}").contains(normGenre)
+                }
+                tracks = (tracks + rescued).distinctBy { it.id }.take(maxTracks)
+            } catch (_: Exception) { }
+        }
+
+        if (tracks.isEmpty() && apiAlbums.isEmpty()) {
+            try {
+                val sr = search(spec?.title ?: genre, artistCount = 30, albumCount = 100, songCount = 500)
+                tracks = sr.tracks
+                apiAlbums = sr.albums
+            } catch (_: Exception) {
+                // Keep empty
+            }
+        }
+
+        // Build complete list of albums / movies / games / sources from both getAlbumList2 and the tracks themselves
+        val derivedAlbums = tracks
+            .groupBy { t ->
+                val cleanAlb = cleanAlbumName(t.album).trim()
+                val hasValidAlbum = cleanAlb.isNotBlank() &&
+                    !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
+                    !cleanAlb.equals("Neznámy album", ignoreCase = true) &&
+                    !cleanAlb.equals("[Unknown Album]", ignoreCase = true)
+                when {
+                    t.albumId.isNotBlank() && hasValidAlbum -> "al:${t.albumId}"
+                    hasValidAlbum -> "al_group:$cleanAlb"
+                    else -> {
+                        val cleanArt = cleanArtistName(t.artist).trim()
+                            .ifBlank {
+                                if (t.title.contains(" - ")) t.title.substringBefore(" - ").trim() else "Rôzne"
+                            }
+                        "al_group:$cleanArt"
+                    }
+                }
+            }
+            .map { (groupKey, groupTracks) ->
+                val first = groupTracks.first()
+                val cleanAlb = cleanAlbumName(first.album).trim()
+                val hasValidAlbum = cleanAlb.isNotBlank() &&
+                    !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
+                    !cleanAlb.equals("Neznámy album", ignoreCase = true) &&
+                    !cleanAlb.equals("[Unknown Album]", ignoreCase = true)
+                val displayTitle = if (hasValidAlbum) {
+                    cleanAlb
+                } else {
+                    cleanArtistName(first.artist).trim()
+                        .ifBlank {
+                            if (first.title.contains(" - ")) first.title.substringBefore(" - ").trim() else "Nezaradené"
+                        }
+                }
+                val artistSubtitle = cleanArtistName(first.artist).trim()
+                val sub = listOf(
+                    artistSubtitle.takeIf { !it.equals(displayTitle, ignoreCase = true) }.orEmpty(),
+                    if (first.year > 0) first.year.toString() else ""
+                ).filter { it.isNotBlank() }.joinToString(" • ")
+
+                AlbumItem(
+                    id = groupKey,
+                    title = displayTitle,
+                    subtitle = sub,
+                    techSpec = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
+                    badge = first.badge,
+                    imageUrl = first.imageUrl
+                )
+            }
+
+        val existingIds = apiAlbums.map { it.id }.toSet()
+        val existingTitles = apiAlbums.map { it.title.lowercase(Locale.ROOT) }.toSet()
+        val mergedAlbums = (apiAlbums + derivedAlbums.filter {
+            it.id !in existingIds && it.title.lowercase(Locale.ROOT) !in existingTitles
+        }).sortedBy { it.title.lowercase(Locale.ROOT) }
+
+        val countPart = if (mergedAlbums.isNotEmpty()) {
+            "${mergedAlbums.size} ${plural(mergedAlbums.size, "album / dielo", "albumy / diela", "albumov / diel")} • ${tracks.size} ${plural(tracks.size, "skladba", "skladby", "skladieb")}"
+        } else {
+            "${tracks.size} ${plural(tracks.size, "skladba", "skladby", "skladieb")}"
+        }
+        val subtitleText = if (spec != null && spec.subtitle.isNotBlank()) {
+            "${spec.subtitle} • $countPart"
+        } else {
+            countPart
+        }
+
+        CollectionDetail(
             id = "ge:$genre",
             kind = "Žáner",
-            title = genre,
-            subtitle = "Žáner",
-            coverUrl = tracks.firstOrNull()?.imageUrl.orEmpty(),
+            title = spec?.title ?: genre,
+            subtitle = subtitleText,
+            coverUrl = mergedAlbums.firstOrNull { it.imageUrl.isNotBlank() }?.imageUrl
+                ?: tracks.firstOrNull()?.imageUrl.orEmpty(),
             metaLine = metaLine(tracks),
-            tracks = tracks
+            tracks = tracks,
+            albums = mergedAlbums
         )
     }
 

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import com.example.data.formatTrackSubtitle
 import androidx.compose.foundation.shape.CircleShape
@@ -50,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -130,7 +133,11 @@ fun ExploreScreen(
     } else uiState.libraryPlaylists
     val genres = if (isSearching) {
         uiState.genres.filter { it.name.contains(query, ignoreCase = true) }
-    } else uiState.genres.take(24)
+    } else if (uiState.exploreCategory == "Žánre") {
+        uiState.genres
+    } else {
+        uiState.genres.take(36)
+    }
 
     fun show(category: String) = uiState.exploreCategory == "Všetko" || uiState.exploreCategory == "Power Metal" || uiState.exploreCategory == category
 
@@ -285,14 +292,12 @@ fun ExploreScreen(
 
         // Horizontal Category Chips
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                categories.forEach { category ->
+                items(categories, key = { it }) { category ->
                     val isSelected = uiState.exploreCategory == category
                     Box(
                         modifier = Modifier
@@ -534,7 +539,6 @@ fun ExploreScreen(
                                     .shadow(8.dp, RoundedCornerShape(50), spotColor = PrimaryContainer)
                                     .clip(RoundedCornerShape(50))
                                     .background(PrimaryContainer)
-                                    .clickable { onArtistClick(topArtist) }
                                     .padding(horizontal = 14.dp, vertical = 7.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -660,14 +664,12 @@ fun ExploreScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        content.artists.forEach { artist ->
+                        items(content.artists, key = { it.id }) { artist ->
                             Column(
                                 modifier = Modifier
                                     .width(112.dp)
@@ -1034,7 +1036,9 @@ private fun ExploreTrackRow(
             )
             IconButton(
                 onClick = onLikeClick,
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier
+                    .size(34.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -1045,7 +1049,9 @@ private fun ExploreTrackRow(
             }
             IconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,

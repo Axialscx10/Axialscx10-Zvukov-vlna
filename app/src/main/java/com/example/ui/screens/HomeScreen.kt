@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -100,14 +101,14 @@ fun HomeScreen(
         // Filter Chips Carousel (genres from the server)
         if (filters.size > 1) {
             item {
-                Row(
+                LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    filters.forEach { filter ->
+                    items(filters, key = { it }) { filter ->
                         val isSelected = uiState.homeFilter == filter
                         Box(
                             modifier = Modifier
@@ -507,7 +508,9 @@ private fun QuickPickTrackRow(
         ) {
             IconButton(
                 onClick = onLikeClick,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier
+                    .size(40.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = if (isLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
@@ -518,7 +521,9 @@ private fun QuickPickTrackRow(
             }
             IconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier
+                    .size(40.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,

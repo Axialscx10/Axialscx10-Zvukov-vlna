@@ -24,9 +24,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Share
@@ -106,6 +110,8 @@ fun NowPlayingScreen(
     onLyricLineClick: (Int) -> Unit,
     onOpenEqualizer: () -> Unit,
     onOpenArtistDetail: () -> Unit,
+    onOpenAlbumDetail: () -> Unit = {},
+    onOpenTrackArtist: (TrackItem) -> Unit = {},
     onOpenStreamingSettings: () -> Unit,
     onQueueItemClick: (Int) -> Unit,
     onRelatedClick: (TrackItem) -> Unit,
@@ -303,6 +309,10 @@ fun NowPlayingScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Metadata & Primary Action Row
+                val artistDisplay = com.example.data.cleanArtistName(uiState.currentTrack.artist)
+                    .ifBlank { "Neznámy interpret" }
+                val albumDisplay = com.example.data.cleanAlbumName(uiState.currentTrack.album)
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -311,7 +321,9 @@ fun NowPlayingScreen(
                     Column(
                         modifier = Modifier
                             .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable { onOpenArtistDetail() }
+                            .padding(vertical = 4.dp, horizontal = 4.dp)
                     ) {
                         Text(
                             text = uiState.currentTrack.title,
@@ -321,17 +333,30 @@ fun NowPlayingScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = SecondaryFixed,
+                                modifier = Modifier.size(15.dp)
+                            )
                             Text(
-                                text = com.example.data.cleanArtistName(uiState.currentTrack.artist).ifBlank { "Neznámy interpret" },
-                                color = OnSurfaceVariant,
+                                text = artistDisplay,
+                                color = SecondaryFixed,
                                 fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Otvoriť interpreta",
+                                tint = SecondaryFixed,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -400,7 +425,116 @@ fun NowPlayingScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Prominent Artist / Band & Album Quick-Jump Buttons (works for any playing mix/selection on TV & Phone)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceContainerHigh.copy(alpha = 0.9f))
+                            .border(1.dp, SecondaryFixed.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                            .clickable { onOpenArtistDetail() }
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                            .testTag("now_playing_open_artist_btn"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = SecondaryFixed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "INTERPRET / KAPELA",
+                                    color = SecondaryFixed,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 0.6.sp
+                                )
+                                Text(
+                                    text = artistDisplay,
+                                    color = OnSurface,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Načítať interpreta",
+                            tint = SecondaryFixed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    if (albumDisplay.isNotBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SurfaceContainerHigh.copy(alpha = 0.9f))
+                                .border(1.dp, Primary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                .clickable { onOpenAlbumDetail() }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("now_playing_open_album_btn"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Album,
+                                    contentDescription = null,
+                                    tint = Primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "ALBUM",
+                                        color = Primary,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 0.6.sp
+                                    )
+                                    Text(
+                                        text = albumDisplay,
+                                        color = OnSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Otvoriť album",
+                                tint = Primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Waveform & Progress Scrubber
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -708,7 +842,8 @@ fun NowPlayingScreen(
                         onRelatedClick = onRelatedClick,
                         onRemoveFromQueue = onRemoveFromQueue,
                         onClearUpcomingQueue = onClearUpcomingQueue,
-                        onOpenTrackMenu = onOpenTrackMenu
+                        onOpenTrackMenu = onOpenTrackMenu,
+                        onOpenTrackArtist = onOpenTrackArtist
                     )
                 }
             }
@@ -724,7 +859,8 @@ private fun NowPlayingDrawerContent(
     onRelatedClick: (TrackItem) -> Unit,
     onRemoveFromQueue: (Int) -> Unit,
     onClearUpcomingQueue: () -> Unit,
-    onOpenTrackMenu: (TrackItem) -> Unit
+    onOpenTrackMenu: (TrackItem) -> Unit,
+    onOpenTrackArtist: (TrackItem) -> Unit
 ) {
     when (uiState.nowPlayingTab) {
         "ĎALŠIE", "NASLEDUJÚCE", "UP NEXT" -> {
@@ -775,6 +911,7 @@ private fun NowPlayingDrawerContent(
                     DrawerTrackRow(
                         track = track,
                         onClick = { onQueueItemClick(queueIndex) },
+                        onArtistClick = { onOpenTrackArtist(track) },
                         onRemove = { onRemoveFromQueue(queueIndex) },
                         onMenuClick = { onOpenTrackMenu(track) }
                     )
@@ -792,6 +929,7 @@ private fun NowPlayingDrawerContent(
                     DrawerTrackRow(
                         track = track,
                         onClick = { onRelatedClick(track) },
+                        onArtistClick = { onOpenTrackArtist(track) },
                         onRemove = null,
                         onMenuClick = { onOpenTrackMenu(track) }
                     )
@@ -865,6 +1003,7 @@ private fun DrawerHint(text: String) {
 private fun DrawerTrackRow(
     track: TrackItem,
     onClick: () -> Unit,
+    onArtistClick: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
     onMenuClick: (() -> Unit)? = null
 ) {
@@ -900,13 +1039,32 @@ private fun DrawerTrackRow(
             )
             Text(
                 text = track.artist,
-                color = OnSurfaceVariant,
+                color = SecondaryFixed,
                 fontSize = 12.sp,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (onArtistClick != null) {
+                    Modifier.clickable { onArtistClick() }
+                } else {
+                    Modifier
+                }
             )
         }
         Text(text = track.duration, color = OnSurfaceVariant, fontSize = 12.sp)
+
+        if (onArtistClick != null) {
+            IconButton(
+                onClick = onArtistClick,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Otvoriť interpreta",
+                    tint = SecondaryFixed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
 
         if (onMenuClick != null) {
             IconButton(

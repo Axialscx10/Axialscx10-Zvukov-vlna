@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -58,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -165,14 +167,14 @@ fun LibraryScreen(
     ) {
         // Filter Chips Scroll Area
         item {
-            Row(
+            LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                chips.forEach { chip ->
+                items(chips, key = { it }) { chip ->
                     val isSelected = uiState.libraryFilterChip == chip
                     Row(
                         modifier = Modifier
@@ -776,7 +778,9 @@ private fun LibraryTrackRow(
         if (onMenuClick != null) {
             IconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier
+                    .size(36.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
@@ -1032,7 +1036,9 @@ private fun LibraryPlaylistRow(
 
         IconButton(
             onClick = onClick,
-            modifier = Modifier.size(40.dp)
+            modifier = Modifier
+                .size(40.dp)
+                .focusProperties { canFocus = false }
         ) {
             Icon(
                 imageVector = Icons.Default.MoreVert,

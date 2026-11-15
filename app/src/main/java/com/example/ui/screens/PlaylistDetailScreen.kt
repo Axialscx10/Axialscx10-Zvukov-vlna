@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,61 +17,80 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.example.data.formatTrackSubtitle
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.AlbumItem
 import com.example.data.TrackItem
+import com.example.data.formatTrackSubtitle
 import com.example.ui.SoundWaveUiState
 import com.example.ui.components.AnimatedEqualizerBars
 import com.example.ui.components.NetImage
 import com.example.ui.theme.OnPrimary
+import com.example.ui.theme.OnPrimaryContainer
 import com.example.ui.theme.OnSurface
 import com.example.ui.theme.OnSurfaceVariant
+import com.example.ui.theme.Outline
 import com.example.ui.theme.Primary
 import com.example.ui.theme.PrimaryContainer
 import com.example.ui.theme.Secondary
+import com.example.ui.theme.SecondaryFixed
 import com.example.ui.theme.Surface
 import com.example.ui.theme.SurfaceContainer
 import com.example.ui.theme.SurfaceContainerHigh
 import com.example.ui.theme.SurfaceContainerHighest
 import com.example.ui.theme.SurfaceContainerLow
 import com.example.ui.theme.SurfaceContainerLowest
+
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.ui.graphics.SolidColor
+import com.example.data.ArtistItem
+import com.example.data.SmartGenreCatalog
+import com.example.data.SmartGenreSpec
+import com.example.data.cleanAlbumName
+import com.example.data.cleanArtistName
+import com.example.data.plural
 
 private val DetailLosslessSuffixes = setOf("flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff")
 
@@ -82,7 +102,9 @@ fun PlaylistDetailScreen(
     onTrackLikeToggle: (String) -> Unit,
     onOpenExplore: () -> Unit,
     onOpenStreamingSettings: () -> Unit,
-    onOpenTrackMenu: (TrackItem) -> Unit = {}
+    onOpenTrackMenu: (TrackItem) -> Unit = {},
+    onAlbumClick: (AlbumItem) -> Unit = {},
+    onArtistClick: (TrackItem) -> Unit = {}
 ) {
     val detail = uiState.detail
     if (detail == null) {
@@ -96,12 +118,196 @@ fun PlaylistDetailScreen(
         }
         return
     }
-    val tracks = detail.tracks
+    val allTracks = detail.tracks
+
+    // Build complete list of albums / soundtracks / works (for Interpret, Žáner/Soundtrack, or multi-album playlists)
+    val artistAlbums = remember(detail.id, detail.albums, allTracks) {
+        if (detail.albums.isNotEmpty()) {
+            detail.albums
+        } else if (detail.kind == "Interpret" || detail.kind == "Žáner" || detail.kind == "Playlist" || detail.kind == "Zbierka") {
+            allTracks
+                .groupBy { t ->
+                    val cleanAlb = cleanAlbumName(t.album).trim()
+                    val hasValidAlbum = cleanAlb.isNotBlank() &&
+                        !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
+                        !cleanAlb.equals("Neznámy album", ignoreCase = true)
+                    when {
+                        t.albumId.isNotBlank() && hasValidAlbum -> "al:${t.albumId}"
+                        hasValidAlbum -> "al_group:$cleanAlb"
+                        else -> {
+                            val cleanArt = cleanArtistName(t.artist).trim().ifBlank { "Rôzne" }
+                            "al_group:$cleanArt"
+                        }
+                    }
+                }
+                .map { (key, groupTracks) ->
+                    val first = groupTracks.first()
+                    val cleanAlb = cleanAlbumName(first.album).trim()
+                    val hasValidAlbum = cleanAlb.isNotBlank() &&
+                        !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
+                        !cleanAlb.equals("Neznámy album", ignoreCase = true)
+                    val title = if (hasValidAlbum) cleanAlb else cleanArtistName(first.artist).ifBlank { "Nezaradené" }
+                    AlbumItem(
+                        id = key,
+                        title = title,
+                        subtitle = if (first.year > 0) "${cleanArtistName(first.artist)} • ${first.year}" else cleanArtistName(first.artist),
+                        techSpec = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
+                        badge = first.badge,
+                        imageUrl = first.imageUrl
+                    )
+                }
+                .takeIf { it.size > 1 || detail.kind == "Interpret" || detail.kind == "Žáner" }
+                .orEmpty()
+        } else {
+            emptyList()
+        }
+    }
+
+    // Build list of artists/composers in this genre/collection when not already on a single artist page
+    val collectionArtists = remember(detail.id, detail.kind, allTracks) {
+        if (detail.kind == "Interpret") {
+            emptyList()
+        } else {
+            allTracks
+                .groupBy { t ->
+                    cleanArtistName(t.artist).trim()
+                        .ifBlank {
+                            if (t.title.contains(" - ")) t.title.substringBefore(" - ").trim() else "Neznámy interpret"
+                        }
+                }
+                .filter { (name, _) -> name.isNotBlank() }
+                .map { (name, groupTracks) ->
+                    val first = groupTracks.first()
+                    ArtistItem(
+                        id = if (first.artistId.isNotBlank()) "ar:${first.artistId}" else "ar_name:$name",
+                        name = name,
+                        trackCount = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
+                        imageUrl = first.imageUrl
+                    ) to first
+                }
+                .sortedBy { it.first.name.lowercase() }
+                .takeIf { it.size > 1 }
+                .orEmpty()
+        }
+    }
+
+    var selectedAlbumFilterId by remember(detail.id) { mutableStateOf<String?>(null) }
+    var selectedArtistFilterName by remember(detail.id) { mutableStateOf<String?>(null) }
+    var selectedSubGenreId by remember(detail.id) { mutableStateOf<String?>(null) }
+    var filterQuery by remember(detail.id) { mutableStateOf("") }
+    // View modes: "SKLADBY" (overview + tracks), "ALBUMY" (full album/soundtrack grid), "INTERPRETI" (full artist grid)
+    var viewMode by remember(detail.id) { mutableStateOf("SKLADBY") }
+
+    // Available sub-genre slices inside large genres (e.g., splitting "Rock" into Power Metal, Heavy Metal, SK & CZ, etc.)
+    val subGenreChips = remember(detail.id, detail.kind, detail.title, allTracks) {
+        if (detail.kind == "Žáner" && allTracks.size >= 30) {
+            val currentSpec = SmartGenreCatalog.findSpec(detail.title)
+            SmartGenreCatalog.specs
+                .filter { it.id != currentSpec?.id }
+                .mapNotNull { spec ->
+                    val count = allTracks.count { SmartGenreCatalog.matchesTrack(it, spec) }
+                    if (count >= 3) spec to count else null
+                }
+                .sortedByDescending { it.second }
+        } else {
+            emptyList()
+        }
+    }
+
+    val activeSubGenreSpec: SmartGenreSpec? = remember(selectedSubGenreId, subGenreChips) {
+        subGenreChips.firstOrNull { it.first.id == selectedSubGenreId }?.first
+    }
+
+    val q = filterQuery.trim()
+
+    val tracks = remember(allTracks, selectedAlbumFilterId, selectedArtistFilterName, activeSubGenreSpec, artistAlbums, q) {
+        var result = allTracks
+        if (activeSubGenreSpec != null) {
+            result = result.filter { SmartGenreCatalog.matchesTrack(it, activeSubGenreSpec) }
+        }
+        if (selectedAlbumFilterId != null) {
+            val selId = selectedAlbumFilterId!!
+            val rawAlbumId = selId.removePrefix("al:").removePrefix("al_group:")
+            val selectedAlbumTitle = artistAlbums.find { it.id == selId }?.title ?: rawAlbumId
+            result = result.filter { t ->
+                val cleanAlb = cleanAlbumName(t.album).trim()
+                val cleanArt = cleanArtistName(t.artist).trim()
+                (selId.startsWith("al:") && t.albumId == rawAlbumId) ||
+                    cleanAlb.equals(selectedAlbumTitle, ignoreCase = true) ||
+                    (cleanAlb.isBlank() && cleanArt.equals(selectedAlbumTitle, ignoreCase = true)) ||
+                    (cleanAlb.isBlank() && t.title.startsWith("$selectedAlbumTitle -", ignoreCase = true))
+            }
+        }
+        if (selectedArtistFilterName != null) {
+            val targetArtist = selectedArtistFilterName!!
+            result = result.filter { t ->
+                val cleanArt = cleanArtistName(t.artist).trim()
+                cleanArt.equals(targetArtist, ignoreCase = true) ||
+                    t.artist.contains(targetArtist, ignoreCase = true) ||
+                    t.title.startsWith("$targetArtist -", ignoreCase = true)
+            }
+        }
+        if (q.isNotEmpty()) {
+            result = result.filter { t ->
+                t.title.contains(q, ignoreCase = true) ||
+                    t.artist.contains(q, ignoreCase = true) ||
+                    t.album.contains(q, ignoreCase = true)
+            }
+        }
+        result
+    }
+
+    val filteredAlbums = remember(artistAlbums, activeSubGenreSpec, tracks, q) {
+        var base = if (activeSubGenreSpec == null) {
+            artistAlbums
+        } else {
+            val trackAlbumIds = tracks.mapNotNull { it.albumId.takeIf { id -> id.isNotBlank() } }.toSet()
+            val trackAlbumTitles = tracks.map { cleanAlbumName(it.album).trim().lowercase() }.toSet()
+            artistAlbums.filter { alb ->
+                val rawId = alb.id.removePrefix("al:").removePrefix("al_group:")
+                rawId in trackAlbumIds ||
+                    alb.title.trim().lowercase() in trackAlbumTitles ||
+                    SmartGenreCatalog.matchesAlbum(alb, activeSubGenreSpec)
+            }
+        }
+        if (q.isNotEmpty()) {
+            base = base.filter {
+                it.title.contains(q, ignoreCase = true) || it.subtitle.contains(q, ignoreCase = true)
+            }
+        }
+        base
+    }
+
+    val filteredArtists = remember(collectionArtists, activeSubGenreSpec, tracks, q) {
+        var base = if (activeSubGenreSpec == null) {
+            collectionArtists
+        } else {
+            val matchingArtists = tracks.map { cleanArtistName(it.artist).trim().lowercase() }.toSet()
+            collectionArtists.filter { (artist, sampleTrack) ->
+                artist.name.trim().lowercase() in matchingArtists ||
+                    SmartGenreCatalog.matchesTrack(sampleTrack, activeSubGenreSpec)
+            }
+        }
+        if (q.isNotEmpty()) {
+            base = base.filter { (artist, _) ->
+                artist.name.contains(q, ignoreCase = true)
+            }
+        }
+        base
+    }
+
     val qualityLabel = when {
         tracks.isEmpty() -> null
         tracks.any { it.bitDepth >= 24 } -> "HI-RES LOSSLESS"
         tracks.all { it.suffix in DetailLosslessSuffixes } -> "LOSSLESS"
         else -> null
+    }
+
+    val albumsSectionTitle = when {
+        detail.title.contains("Soundtrack", ignoreCase = true) -> "Z čoho to je (Filmy / Hry / Albumy)"
+        detail.kind == "Žáner" -> "Albumy a diela v žánri"
+        detail.kind == "Interpret" -> "Albumy interpreta"
+        else -> "Albumy vo výbere"
     }
 
     LazyColumn(
@@ -159,8 +365,8 @@ fun PlaylistDetailScreen(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(224.dp)
-                        .shadow(28.dp, RoundedCornerShape(16.dp), ambientColor = PrimaryContainer, spotColor = PrimaryContainer)
+                        .size(if (artistAlbums.isNotEmpty()) 156.dp else 208.dp)
+                        .shadow(24.dp, RoundedCornerShape(16.dp), ambientColor = PrimaryContainer, spotColor = PrimaryContainer)
                         .clip(RoundedCornerShape(16.dp))
                         .background(SurfaceContainerHigh)
                 ) {
@@ -209,32 +415,64 @@ fun PlaylistDetailScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
                     text = detail.title,
                     color = OnSurface,
-                    fontSize = 28.sp,
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.5).sp,
                     textAlign = TextAlign.Center
                 )
                 if (detail.subtitle.isNotBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = detail.subtitle,
-                        color = OnSurfaceVariant,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
+                    val canOpenAlbumArtist = detail.kind == "Album" && allTracks.isNotEmpty()
+                    Row(
+                        modifier = if (canOpenAlbumArtist) {
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(SurfaceContainerHigh.copy(alpha = 0.7f))
+                                .clickable { onArtistClick(allTracks.first()) }
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                        } else {
+                            Modifier
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        if (canOpenAlbumArtist) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = SecondaryFixed,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        Text(
+                            text = detail.subtitle,
+                            color = SecondaryFixed,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
+                        if (canOpenAlbumArtist) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Otvoriť interpreta",
+                                tint = SecondaryFixed,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Server & format badges
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
                         modifier = Modifier
@@ -281,13 +519,14 @@ fun PlaylistDetailScreen(
                                 text = firstTech,
                                 color = Secondary,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = detail.metaLine,
                     color = OnSurfaceVariant,
@@ -295,9 +534,10 @@ fun PlaylistDetailScreen(
                     fontWeight = FontWeight.SemiBold
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Main Action Buttons
+                val isFiltered = selectedAlbumFilterId != null || selectedArtistFilterName != null || selectedSubGenreId != null || q.isNotEmpty()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -310,7 +550,13 @@ fun PlaylistDetailScreen(
                             .shadow(14.dp, RoundedCornerShape(50), spotColor = PrimaryContainer)
                             .clip(RoundedCornerShape(50))
                             .background(PrimaryContainer)
-                            .clickable { onPlayAll(false) }
+                            .clickable {
+                                if (isFiltered && tracks.isNotEmpty()) {
+                                    onTrackClick(tracks.first(), tracks)
+                                } else {
+                                    onPlayAll(false)
+                                }
+                            }
                             .testTag("playlist_play_btn"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
@@ -323,7 +569,7 @@ fun PlaylistDetailScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Prehrať",
+                            text = if (isFiltered) "Prehrať výber (${tracks.size})" else "Prehrať (${allTracks.size})",
                             color = OnPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
@@ -336,7 +582,14 @@ fun PlaylistDetailScreen(
                             .height(48.dp)
                             .clip(RoundedCornerShape(50))
                             .background(SurfaceContainerHighest)
-                            .clickable { onPlayAll(true) },
+                            .clickable {
+                                if (isFiltered && tracks.isNotEmpty()) {
+                                    val shuffled = tracks.shuffled()
+                                    onTrackClick(shuffled.first(), shuffled)
+                                } else {
+                                    onPlayAll(true)
+                                }
+                            },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
@@ -358,91 +611,826 @@ fun PlaylistDetailScreen(
             }
         }
 
-        // Tracklist Header
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp, start = 16.dp, end = 16.dp)
-            ) {
-                Row(
+        // View Mode Switcher + In-Collection Filter Search (for Genres, Soundtracks, Artists, Large Playlists)
+        if (artistAlbums.isNotEmpty() || collectionArtists.isNotEmpty() || allTracks.size > 15) {
+            item {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(top = 18.dp, start = 16.dp, end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "Skladby",
-                            color = OnSurface,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(SurfaceContainerHigh)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                    // Big TV D-pad & Touch friendly mode tabs
+                    if (artistAlbums.isNotEmpty() || collectionArtists.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = tracks.size.toString(),
-                                color = OnSurfaceVariant,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            val isTracksMode = viewMode == "SKLADBY"
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isTracksMode) PrimaryContainer else SurfaceContainerHigh)
+                                    .border(
+                                        1.dp,
+                                        if (isTracksMode) Primary else Outline.copy(alpha = 0.25f),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { viewMode = "SKLADBY" }
+                                    .padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LibraryMusic,
+                                    contentDescription = null,
+                                    tint = if (isTracksMode) OnPrimaryContainer else OnSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Skladby (${tracks.size})",
+                                    color = if (isTracksMode) OnPrimaryContainer else OnSurface,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            if (artistAlbums.isNotEmpty()) {
+                                val isAlbumsMode = viewMode == "ALBUMY"
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1.2f)
+                                        .height(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isAlbumsMode) PrimaryContainer else SurfaceContainerHigh)
+                                        .border(
+                                            1.dp,
+                                            if (isAlbumsMode) Primary else SecondaryFixed.copy(alpha = 0.4f),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable { viewMode = "ALBUMY" }
+                                        .padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Album,
+                                        contentDescription = null,
+                                        tint = if (isAlbumsMode) OnPrimaryContainer else SecondaryFixed,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (detail.kind == "Žáner") {
+                                            "Z čoho to je / Albumy (${filteredAlbums.size})"
+                                        } else {
+                                            "Albumy (${filteredAlbums.size})"
+                                        },
+                                        color = if (isAlbumsMode) OnPrimaryContainer else OnSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            if (collectionArtists.isNotEmpty()) {
+                                val isArtistsMode = viewMode == "INTERPRETI"
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isArtistsMode) PrimaryContainer else SurfaceContainerHigh)
+                                        .border(
+                                            1.dp,
+                                            if (isArtistsMode) Primary else Outline.copy(alpha = 0.25f),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable { viewMode = "INTERPRETI" }
+                                        .padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = if (isArtistsMode) OnPrimaryContainer else SecondaryFixed,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Interpreti (${filteredArtists.size})",
+                                        color = if (isArtistsMode) OnPrimaryContainer else OnSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
-                }
 
-                HorizontalDivider(color = SurfaceContainerHigh.copy(alpha = 0.45f))
-                Spacer(modifier = Modifier.height(6.dp))
+                    // Sub-genre / Style chips inside large genres (e.g., splitting "Rock" into Power Metal, Heavy Metal, SK & CZ, etc.)
+                    if (subGenreChips.isNotEmpty()) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 2.dp)
+                        ) {
+                            item {
+                                val isAllSelected = selectedSubGenreId == null
+                                Box(
+                                    modifier = Modifier
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (isAllSelected) SecondaryFixed else SurfaceContainerHigh)
+                                        .border(
+                                            1.dp,
+                                            if (isAllSelected) SecondaryFixed else Outline.copy(alpha = 0.3f),
+                                            RoundedCornerShape(50)
+                                        )
+                                        .clickable { selectedSubGenreId = null }
+                                        .padding(horizontal = 14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Všetky štýly (${allTracks.size})",
+                                        color = if (isAllSelected) SurfaceContainerLowest else OnSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            items(subGenreChips, key = { it.first.id }) { (spec, count) ->
+                                val isSelected = selectedSubGenreId == spec.id
+                                Box(
+                                    modifier = Modifier
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (isSelected) SecondaryFixed else SurfaceContainerHigh)
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) SecondaryFixed else Outline.copy(alpha = 0.3f),
+                                            RoundedCornerShape(50)
+                                        )
+                                        .clickable {
+                                            selectedSubGenreId = if (isSelected) null else spec.id
+                                        }
+                                        .padding(horizontal = 14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${spec.title} ($count)",
+                                        color = if (isSelected) SurfaceContainerLowest else OnSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                if (detail.isLoading) {
-                    Text(
-                        text = "Načítavam skladby…",
-                        color = OnSurfaceVariant,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                } else if (detail.error != null) {
-                    Text(
-                        text = detail.error ?: "",
-                        color = OnSurfaceVariant,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                } else if (tracks.isEmpty()) {
-                    Text(
-                        text = "Žiadne skladby",
-                        color = OnSurfaceVariant,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
+                    // In-collection search/filter bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(SurfaceContainerHigh)
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Filtrovať",
+                            tint = OnSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        BasicTextField(
+                            value = filterQuery,
+                            onValueChange = { filterQuery = it },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                color = OnSurface,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            cursorBrush = SolidColor(Primary),
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { innerTextField ->
+                                if (filterQuery.isEmpty()) {
+                                    Text(
+                                        text = "Filtrovať v „${detail.title}“ (film, hra, album, kapela, skladba)…",
+                                        color = OnSurfaceVariant,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                        if (filterQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { filterQuery = "" },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Vyčistiť",
+                                    tint = OnSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Active filter banner (when user picked a specific Soundtrack/Album or Artist)
+                    if (selectedAlbumFilterId != null || selectedArtistFilterName != null) {
+                        val activeAlbumObj = artistAlbums.find { it.id == selectedAlbumFilterId }
+                        val activeLabel = activeAlbumObj?.title ?: selectedArtistFilterName.orEmpty()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SecondaryFixed.copy(alpha = 0.16f))
+                                .border(1.dp, SecondaryFixed.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (selectedAlbumFilterId != null) Icons.Default.Album else Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = SecondaryFixed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = if (selectedAlbumFilterId != null) "VYBRANÝ ALBUM / DIELO" else "VYBRANÝ INTERPRET",
+                                        color = SecondaryFixed,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = "$activeLabel (${tracks.size} ${plural(tracks.size, "skladba", "skladby", "skladieb")})",
+                                        color = OnSurface,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (activeAlbumObj != null && activeAlbumObj.id.startsWith("al:")) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(PrimaryContainer)
+                                            .clickable { onAlbumClick(activeAlbumObj) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Celý album",
+                                            color = OnPrimaryContainer,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = OnPrimaryContainer,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(SurfaceContainerHighest)
+                                        .clickable {
+                                            selectedAlbumFilterId = null
+                                            selectedArtistFilterName = null
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Zrušiť filter",
+                                        tint = OnSurface,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Všetko",
+                                        color = OnSurface,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        itemsIndexed(tracks, key = { index, t -> "$index:${t.id}" }) { index, track ->
-            val isActive = uiState.currentTrack.id == track.id
-            val isLiked = track.id in uiState.likedTrackIds
-            val isDownloaded = track.id in uiState.downloadedTrackIds
-            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                PlaylistTrackItemRow(
-                    index = index + 1,
-                    track = track,
-                    isActive = isActive,
-                    isPlaying = isActive && uiState.isPlaying,
-                    isLiked = isLiked,
-                    isDownloaded = isDownloaded,
-                    onClick = { onTrackClick(track, tracks) },
-                    onLikeClick = { onTrackLikeToggle(track.id) },
-                    onMenuClick = { onOpenTrackMenu(track) }
+        // MODE 1: Full Album / Soundtrack Grid ("ALBUMY")
+        if (viewMode == "ALBUMY" && artistAlbums.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 18.dp, start = 16.dp, end = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "$albumsSectionTitle (${filteredAlbums.size})",
+                        color = OnSurface,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Klikni pre výber (OK)",
+                        color = SecondaryFixed,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            val rows = filteredAlbums.chunked(2)
+            items(rows, key = { row -> "album_row_${row.first().id}" }) { rowAlbums ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rowAlbums.forEach { album ->
+                        ArtistAlbumRowCard(
+                            album = album,
+                            onClick = {
+                                if (detail.kind == "Žáner" || album.id.startsWith("al_group:")) {
+                                    // Filter right inside the genre/soundtrack or open album if no local tracks match
+                                    val rawId = album.id.removePrefix("al:").removePrefix("al_group:")
+                                    val hasLocal = allTracks.any {
+                                        it.albumId == rawId ||
+                                            cleanAlbumName(it.album).equals(album.title, ignoreCase = true) ||
+                                            cleanArtistName(it.artist).equals(album.title, ignoreCase = true)
+                                    }
+                                    if (hasLocal) {
+                                        selectedAlbumFilterId = album.id
+                                        viewMode = "SKLADBY"
+                                    } else {
+                                        onAlbumClick(album)
+                                    }
+                                } else {
+                                    onAlbumClick(album)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (rowAlbums.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        // MODE 2: Full Artist / Composer Grid ("INTERPRETI")
+        if (viewMode == "INTERPRETI" && collectionArtists.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 18.dp, start = 16.dp, end = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Interpreti / Autori v žánri (${filteredArtists.size})",
+                        color = OnSurface,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Klikni pre skladby alebo profil",
+                        color = SecondaryFixed,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            val artistRows = filteredArtists.chunked(2)
+            items(artistRows, key = { row -> "artist_row_${row.first().first.id}" }) { rowItems ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rowItems.forEach { (artistItem, sampleTrack) ->
+                        ArtistAlbumRowCard(
+                            album = AlbumItem(
+                                id = artistItem.id,
+                                title = artistItem.name,
+                                subtitle = "Interpret / Kapela",
+                                techSpec = artistItem.trackCount,
+                                badge = "",
+                                imageUrl = artistItem.imageUrl
+                            ),
+                            onClick = {
+                                selectedArtistFilterName = artistItem.name
+                                viewMode = "SKLADBY"
+                            },
+                            onSecondaryAction = { onArtistClick(sampleTrack) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (rowItems.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        // MODE 3: Default Overview + All Tracks ("SKLADBY")
+        if (viewMode == "SKLADBY") {
+            if (filteredAlbums.isNotEmpty() && selectedAlbumFilterId == null && selectedArtistFilterName == null) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 20.dp, start = 16.dp, end = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Album,
+                                    contentDescription = null,
+                                    tint = Primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = albumsSectionTitle,
+                                    color = OnSurface,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(SurfaceContainerHigh)
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = filteredAlbums.size.toString(),
+                                        color = SecondaryFixed,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            if (filteredAlbums.size > 8) {
+                                Text(
+                                    text = "Všetky (${filteredAlbums.size}) ➔",
+                                    color = SecondaryFixed,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { viewMode = "ALBUMY" }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        // Show up to 8 albums in overview (or all if <= 10) so TV remote can easily reach tracks too
+                        val previewAlbums = if (filteredAlbums.size <= 10) filteredAlbums else filteredAlbums.take(8)
+                        previewAlbums.chunked(2).forEach { rowAlbums ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                rowAlbums.forEach { album ->
+                                    ArtistAlbumRowCard(
+                                        album = album,
+                                        onClick = {
+                                            if (detail.kind == "Žáner" || album.id.startsWith("al_group:")) {
+                                                val rawId = album.id.removePrefix("al:").removePrefix("al_group:")
+                                                val hasLocal = allTracks.any {
+                                                    it.albumId == rawId ||
+                                                        cleanAlbumName(it.album).equals(album.title, ignoreCase = true) ||
+                                                        cleanArtistName(it.artist).equals(album.title, ignoreCase = true)
+                                                }
+                                                if (hasLocal) {
+                                                    selectedAlbumFilterId = album.id
+                                                } else {
+                                                    onAlbumClick(album)
+                                                }
+                                            } else {
+                                                onAlbumClick(album)
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                if (rowAlbums.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+
+                        if (filteredAlbums.size > previewAlbums.size) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SurfaceContainerHigh)
+                                    .border(1.dp, SecondaryFixed.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                    .clickable { viewMode = "ALBUMY" }
+                                    .padding(vertical = 10.dp, horizontal = 14.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Album,
+                                    contentDescription = null,
+                                    tint = SecondaryFixed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Zobraziť všetky diela / albumy na výber (${filteredAlbums.size})",
+                                    color = SecondaryFixed,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = SecondaryFixed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        // Quick filter chips
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 2.dp)
+                        ) {
+                            item {
+                                val isAllSelected = selectedAlbumFilterId == null
+                                Box(
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (isAllSelected) PrimaryContainer else SurfaceContainerHigh)
+                                        .clickable { selectedAlbumFilterId = null }
+                                        .padding(horizontal = 14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Všetky skladby (${allTracks.size})",
+                                        color = if (isAllSelected) OnPrimaryContainer else OnSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            items(filteredAlbums.take(40), key = { "filter_${it.id}" }) { album ->
+                                val isSelected = selectedAlbumFilterId == album.id
+                                Box(
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (isSelected) PrimaryContainer else SurfaceContainerHigh)
+                                        .clickable {
+                                            selectedAlbumFilterId = if (isSelected) null else album.id
+                                        }
+                                        .padding(horizontal = 14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = album.title,
+                                        color = if (isSelected) OnPrimaryContainer else OnSurfaceVariant,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tracklist Header
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 20.dp, start = 16.dp, end = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val activeAlbumTitle = artistAlbums.find { it.id == selectedAlbumFilterId }?.title
+                                ?: selectedArtistFilterName
+                            Text(
+                                text = if (activeAlbumTitle != null) "Skladby • $activeAlbumTitle" else "Všetky skladby",
+                                color = OnSurface,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(SurfaceContainerHigh)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = tracks.size.toString(),
+                                    color = SecondaryFixed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = SurfaceContainerHigh.copy(alpha = 0.45f))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    if (detail.isLoading) {
+                        Text(
+                            text = "Načítavam všetky skladby a albumy zo servera…",
+                            color = OnSurfaceVariant,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else if (detail.error != null) {
+                        Text(
+                            text = detail.error ?: "",
+                            color = OnSurfaceVariant,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else if (tracks.isEmpty()) {
+                        Text(
+                            text = "Žiadne skladby",
+                            color = OnSurfaceVariant,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    }
+                }
+            }
+
+            itemsIndexed(tracks, key = { index, t -> "$index:${t.id}" }) { index, track ->
+                val isActive = uiState.currentTrack.id == track.id
+                val isLiked = track.id in uiState.likedTrackIds
+                val isDownloaded = track.id in uiState.downloadedTrackIds
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+                    PlaylistTrackItemRow(
+                        index = index + 1,
+                        track = track,
+                        isActive = isActive,
+                        isPlaying = isActive && uiState.isPlaying,
+                        isLiked = isLiked,
+                        isDownloaded = isDownloaded,
+                        showArtistButton = detail.kind != "Interpret",
+                        onClick = { onTrackClick(track, tracks) },
+                        onArtistClick = { onArtistClick(track) },
+                        onLikeClick = { onTrackLikeToggle(track.id) },
+                        onMenuClick = { onOpenTrackMenu(track) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArtistAlbumRowCard(
+    album: AlbumItem,
+    onClick: () -> Unit,
+    onSecondaryAction: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(SurfaceContainerLow)
+            .border(1.dp, Outline.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(10.dp)
+            .testTag("artist_album_${album.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(SurfaceContainerHighest)
+        ) {
+            NetImage(
+                url = album.imageUrl,
+                contentDescription = album.title,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = album.title,
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (album.subtitle.isNotBlank()) {
+                Text(
+                    text = album.subtitle,
+                    color = SecondaryFixed,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            if (album.techSpec.isNotBlank()) {
+                Text(
+                    text = album.techSpec,
+                    color = OnSurfaceVariant,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (onSecondaryAction != null) {
+            IconButton(
+                onClick = onSecondaryAction,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Celý profil interpreta",
+                    tint = SecondaryFixed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        } else {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Otvoriť album",
+                tint = Primary,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
@@ -477,7 +1465,9 @@ private fun PlaylistTrackItemRow(
     isPlaying: Boolean,
     isLiked: Boolean,
     isDownloaded: Boolean,
+    showArtistButton: Boolean = false,
     onClick: () -> Unit,
+    onArtistClick: () -> Unit = {},
     onLikeClick: () -> Unit,
     onMenuClick: () -> Unit
 ) {
@@ -487,7 +1477,7 @@ private fun PlaylistTrackItemRow(
             .clip(RoundedCornerShape(10.dp))
             .background(if (isActive) SurfaceContainerLow else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -576,11 +1566,15 @@ private fun PlaylistTrackItemRow(
                     }
                     Text(
                         text = formatTrackSubtitle(track.artist, track.album, track.title),
-                        color = OnSurfaceVariant,
+                        color = if (showArtistButton) SecondaryFixed else OnSurfaceVariant,
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .then(
+                                if (showArtistButton) Modifier.clickable { onArtistClick() } else Modifier
+                            )
                     )
                 }
             }
@@ -606,9 +1600,24 @@ private fun PlaylistTrackItemRow(
                 fontSize = 12.sp,
                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
             )
+            if (showArtistButton) {
+                IconButton(
+                    onClick = onArtistClick,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Prejsť na interpreta",
+                        tint = SecondaryFixed,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
             IconButton(
                 onClick = onLikeClick,
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier
+                    .size(34.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -619,7 +1628,9 @@ private fun PlaylistTrackItemRow(
             }
             IconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(30.dp)
+                modifier = Modifier
+                    .size(30.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,

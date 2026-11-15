@@ -98,7 +98,7 @@ data class SoundWaveUiState(
 
     // Home
     val homeFilter: String = "Všetko",
-    val homeGenres: List<String> = listOf("Power Metal", "Heavy Metal", "Synthwave", "Rock", "Electronic", "Ambient", "Jazz", "Classical"),
+    val homeGenres: List<String> = com.example.data.SmartGenreCatalog.specs.map { it.title },
     val homeQuickPicks: List<TrackItem> = emptyList(),
     val homeListenAgain: List<AlbumItem> = emptyList(),
     val homeNewest: List<AlbumItem> = emptyList(),
@@ -113,12 +113,13 @@ data class SoundWaveUiState(
     val searchResult: SearchResult = SearchResult(emptyList(), emptyList(), emptyList()),
     val exploreLoading: Boolean = false,
     val exploreError: String? = null,
-    val genres: List<GenreItem> = listOf(GenreItem("Power Metal", 0)),
+    val genres: List<GenreItem> = com.example.data.SmartGenreCatalog.specs.map { GenreItem(it.title, 0) },
     val lastSyncTime: String = "Knižnica sa načíta zo servera",
     val isScanningServer: Boolean = false,
 
     // Detail page (album / playlist / artist / favourites / genre)
     val detail: CollectionDetail? = null,
+    val detailStack: List<CollectionDetail> = emptyList(),
 
     // Library State
     val libraryFilterChip: String = "Playlisty",
@@ -382,6 +383,16 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             _uiState.update { it.copy(showScreenSwitcherSheet = false) }
             return true
         }
+        if (current.currentScreen == AppScreen.PLAYLIST_DETAIL && current.detailStack.isNotEmpty()) {
+            val prevDetail = current.detailStack.last()
+            _uiState.update {
+                it.copy(
+                    detail = prevDetail,
+                    detailStack = it.detailStack.dropLast(1)
+                )
+            }
+            return true
+        }
         if (current.backStack.isNotEmpty()) {
             val prev = current.backStack.last()
             _uiState.update {
@@ -564,11 +575,10 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val genresLoaded = genreList.await()
                 val plsLoaded = pls.await()
                 _uiState.update { st ->
-                    val mergedHomeGenres = (listOf("Power Metal") + genresLoaded.map { it.name }).distinct().take(9)
-                    val hasPowerMetal = genresLoaded.any { it.name.equals("Power Metal", ignoreCase = true) }
-                    val mergedGenres = if (genresLoaded.isNotEmpty()) {
-                        if (hasPowerMetal) genresLoaded else listOf(GenreItem("Power Metal", 0)) + genresLoaded
-                    } else st.genres
+                    val mergedGenres = if (genresLoaded.isNotEmpty()) genresLoaded else st.genres
+                    val mergedHomeGenres = (mergedGenres.map { it.name } + com.example.data.SmartGenreCatalog.specs.map { it.title })
+                        .distinct()
+                        .take(15)
                     st.copy(
                         homeLoading = false,
                         homeError = null,
@@ -576,7 +586,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                         homeListenAgain = againList,
                         homeNewest = freshList,
                         genres = mergedGenres,
-                        homeGenres = if (genresLoaded.isNotEmpty()) mergedHomeGenres else st.homeGenres,
+                        homeGenres = mergedHomeGenres,
                         libraryPlaylists = plsLoaded ?: st.libraryPlaylists
                     )
                 }
@@ -648,21 +658,31 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openCollection(id: String) {
+    fun openCollection(id: String, fallbackName: String = "") {
         val kind = when {
             id.startsWith("pl:") -> "Playlist"
-            id.startsWith("al:") -> "Album"
-            id.startsWith("ar:") -> "Interpret"
+            id.startsWith("al:") || id.startsWith("al_name:") -> "Album"
+            id.startsWith("ar:") || id.startsWith("ar_name:") -> "Interpret"
             id.startsWith("ge:") -> "Žáner"
             else -> "Zbierka"
         }
+        val loadingTitle = fallbackName.takeIf { it.isNotBlank() } ?: "Načítavam…"
         _uiState.update { st ->
-            val stack = if (st.currentScreen == AppScreen.PLAYLIST_DETAIL) st.backStack else st.backStack + st.currentScreen
+            val isAlreadyOnDetail = st.currentScreen == AppScreen.PLAYLIST_DETAIL
+            val stack = if (isAlreadyOnDetail) st.backStack else st.backStack + st.currentScreen
+            val nextDetailStack = if (isAlreadyOnDetail && st.detail != null && st.detail.id != id && !st.detail.isLoading) {
+                st.detailStack + st.detail
+            } else if (!isAlreadyOnDetail) {
+                emptyList()
+            } else {
+                st.detailStack
+            }
             st.copy(
                 detail = CollectionDetail(
-                    id = id, kind = kind, title = "Načítavam…", subtitle = "", coverUrl = "",
+                    id = id, kind = kind, title = loadingTitle, subtitle = "Načítavam zo servera…", coverUrl = "",
                     metaLine = "", tracks = emptyList(), isLoading = true
                 ),
+                detailStack = nextDetailStack,
                 currentScreen = AppScreen.PLAYLIST_DETAIL,
                 backStack = stack,
                 showScreenSwitcherSheet = false
@@ -675,8 +695,29 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         }) { a ->
             val result = when {
                 id.startsWith("pl:") -> a.playlistDetail(id.removePrefix("pl:"))
-                id.startsWith("al:") -> a.albumDetail(id.removePrefix("al:"))
-                id.startsWith("ar:") -> a.artistDetail(id.removePrefix("ar:"))
+                id.startsWith("al:") -> {
+                    val rawId = id.removePrefix("al:")
+                    try {
+                        a.albumDetail(rawId)
+                    } catch (e: Exception) {
+                        if (fallbackName.isNotBlank()) a.albumDetailByName(fallbackName) else throw e
+                    }
+                }
+                id.startsWith("al_name:") -> a.albumDetailByName(id.removePrefix("al_name:"))
+                id.startsWith("ar:") -> {
+                    val rawId = id.removePrefix("ar:")
+                    try {
+                        val det = a.artistDetail(rawId)
+                        if (det.tracks.isEmpty() && det.albums.isEmpty() && fallbackName.isNotBlank()) {
+                            a.artistDetailByName(fallbackName)
+                        } else {
+                            det
+                        }
+                    } catch (e: Exception) {
+                        if (fallbackName.isNotBlank()) a.artistDetailByName(fallbackName) else throw e
+                    }
+                }
+                id.startsWith("ar_name:") -> a.artistDetailByName(id.removePrefix("ar_name:"))
                 id.startsWith("ge:") -> a.genreDetail(id.removePrefix("ge:"))
                 else -> a.favoritesDetail()
             }
@@ -689,6 +730,38 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openFavorites() = openCollection("fav")
+
+    /**
+     * Opens the full artist/band page (with all their albums and tracks) for any track,
+     * even when playing a random mix or folder where track.artistId is empty.
+     */
+    fun openArtistForTrack(track: TrackItem) {
+        val cleanedArtist = com.example.data.cleanArtistName(track.artist).trim()
+            .ifBlank {
+                if (track.title.contains(" - ")) track.title.substringBefore(" - ").trim() else ""
+            }
+        val artistId = track.artistId.trim()
+        when {
+            artistId.isNotBlank() -> openCollection("ar:$artistId", fallbackName = cleanedArtist)
+            cleanedArtist.isNotBlank() && !cleanedArtist.equals("Neznámy interpret", ignoreCase = true) -> {
+                openCollection("ar_name:$cleanedArtist", fallbackName = cleanedArtist)
+            }
+            else -> showMessage("Pre túto skladbu nie je uvedený interpret.")
+        }
+    }
+
+    /**
+     * Opens the full album page for any track, resolving by albumId or searching by album title.
+     */
+    fun openAlbumForTrack(track: TrackItem) {
+        val cleanedAlbum = com.example.data.cleanAlbumName(track.album).trim()
+        val albumId = track.albumId.trim()
+        when {
+            albumId.isNotBlank() -> openCollection("al:$albumId", fallbackName = cleanedAlbum)
+            cleanedAlbum.isNotBlank() -> openCollection("al_name:$cleanedAlbum", fallbackName = cleanedAlbum)
+            else -> openArtistForTrack(track)
+        }
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Playback
@@ -1020,8 +1093,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (list.isEmpty() || startIndex !in list.indices) return
-        // Keep the queue a sane size for very long lists.
-        val window = list.drop(startIndex).take(500)
+        // Allow large genre/library queues (up to 2500 tracks).
+        val window = list.drop(startIndex).take(2500)
         val profile = currentStreamProfile()
         val items = window.map { mediaItemFor(a, it, profile) }
         scrobbled = false
@@ -1073,13 +1146,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playAll(list: List<TrackItem>, shuffle: Boolean = false, from: String = "") {
         if (list.isEmpty()) return
-        val start = if (shuffle) list.indices.random() else 0
-        // With shuffle on, the chosen start track plays first and the rest follows in random order.
         if (shuffle) {
-            startQueue(list, 0, from, true)
-            withController { c ->
-                if (start > 0) c.seekToDefaultPosition(start.coerceAtMost(c.mediaItemCount - 1))
-            }
+            startQueue(list.shuffled(), 0, from, true)
         } else {
             startQueue(list, 0, from, false)
         }
