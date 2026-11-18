@@ -166,6 +166,8 @@ fun TvAudioVisualizerCanvas(
 
     val primaryColor = PrimaryContainer
     val secondaryFixedColor = SecondaryFixed
+    val synthwavePaths = remember { Array(3) { Path() } }
+    val ribbonPath = remember { Path() }
 
     Canvas(modifier = modifier) {
         val w = size.width
@@ -409,7 +411,7 @@ fun TvAudioVisualizerCanvas(
 
                 // Multi-layer Neon Oscilloscope Waves across the horizon
                 for (layer in 0..2) {
-                    val path = Path()
+                    val path = synthwavePaths[layer].apply { reset() }
                     val stepCount = 90
                     val layerPhase = layer * 1.3f
                     val ampScale = (h * 0.18f) * (1f - layer * 0.22f)
@@ -488,7 +490,7 @@ fun TvAudioVisualizerCanvas(
                 }
 
                 // Gentle bottom ribbon wave
-                val ribbonPath = Path()
+                ribbonPath.reset()
                 val baseRibbonY = h * 0.84f
                 for (i in 0 until barCount) {
                     val pct = i.toFloat() / (barCount - 1)

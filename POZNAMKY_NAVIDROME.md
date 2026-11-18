@@ -3,27 +3,16 @@
 Táto verzia je tvoj pôvodný dizajn z AI Studia + reálna logika.
 
 ## Čo je reálne
-- Prihlásenie na tvoj server (Subsonic API, token = md5(heslo + soľ)); heslo sa neukladá, len token
-- Home (náhodné skladby, naposledy/nedávno pridané albumy, playlisty, žánre ako filtre)
-- Explore (vyhľadávanie na serveri, albumy, interpreti, žánre, playlisty, filtre FLAC / 24-bit / rok / bitrate)
-- Knižnica (playlisty, obľúbené, albumy, interpreti, vytvorenie playlistu)
-- Detail albumu / playlistu / interpreta / žánru / obľúbených
-- Prehrávanie na pozadí (Media3 ExoPlayer + MediaSession, notifikácia, ovládanie zo zamknutej obrazovky)
-- Obľúbené (srdiečko -> star/unstar), scrobble, texty piesní (synchronizované, ak ich server má), podobné skladby
-- Kvalita streamu podľa siete (Wi‑Fi: pôvodná / MP3 320 / Opus 192 / Opus 128; mobilné dáta: kodek + bitrate z nastavení)
-- Skenovanie knižnice na serveri, test latencie a streamu, vymazanie cache obalov
-
-## Čo je zatiaľ len vzhľad (nič nerobí so zvukom)
-- 10-pásmový ekvalizér, AutoEQ profily, crossfeed, sub-bass
-- Bit-perfect / exclusive mód, ReplayGain, gapless, crossfade, max. vzorkovanie
-- Prepínače VAAPI/QSV (nastavujú sa na serveri)
-- Sťahovanie na offline počúvanie
+- Prihlásenie na tvoj server (Subsonic API, token = md5(heslo + soľ)); heslo sa neukladá, pri odhlásení sa mažú aj história, fronta a lokálna cache; verejné domény bez schémy používajú predvolene `https://`
+- Home, Explore, Knižnica a Detail (rýchly štart z lokálnej diskovej cache + obnova zo servera na pozadí)
+- Prehrávanie na pozadí (Media3 ExoPlayer + OkHttp + 256 MB `SimpleCache` na disku + automatické obnovenie po výpadku siete v aute)
+- Reálny 10-pásmový DSP ekvalizér, BassBoost, Spatial Virtualizer, ReplayGain (čítanie track/album gain tagov z OpenSubsonic), AutoEQ profily a časovač spánku v službe
+- Kvalita streamu (predvolene Originál / FLAC Direct Play aj na mobilných dátach, s voliteľnou úsporou dát)
+- Skenovanie knižnice na serveri, diagnostika latencie a streamu, offline sťahovanie skladieb
 
 ## Build
-1. Otvor priečinok v Android Studiu a nechaj prebehnúť Gradle sync (treba internet).
-2. Run na telefóne (min. Android 7.0 / API 24).
-3. Pri prvom spustení zadaj adresu servera (napr. `http://192.168.1.10:4533`), meno a heslo.
+1. Otvor priečinok v Android Studiu alebo spusti `./gradlew assembleDebug` (priložený Gradle wrapper).
+2. Debug build používa štandardný Android debug keystore (`~/.android/debug.keystore`), nie súbor v repozitári.
+3. Pri prvom spustení zadaj adresu servera (napr. `hudba.beamvid.com` alebo lokálnu IP `192.168.1.10:4533`), meno a heslo.
 
-`debug.keystore` v koreni je len ladiaci kľúč, aby sa dal zostaviť debug build lokálne.
-Povolené je aj `http://` (v manifeste `usesCleartextTraffic`), lebo domáce servery často nemajú HTTPS.
-Ak používaš výhradne HTTPS, môžeš to v `AndroidManifest.xml` nastaviť na `false`.
+Povolené je aj `http://` (v manifeste `usesCleartextTraffic`), lebo domáce LAN / Tailscale servery často nemajú HTTPS.

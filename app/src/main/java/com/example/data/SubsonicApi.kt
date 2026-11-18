@@ -84,11 +84,17 @@ class SubsonicApi(
         return sb.toString()
     }
 
-    /** Cover art URL. Capped at 180px so Smart TVs and phones decode lightweight thumbnails in <1.5ms without OOM. */
+    /** Cover art URL. Capped at 360px so Smart TVs stay light without OOM while phone covers remain sharp. */
     fun coverUrl(coverArtId: String, size: Int = 180): String {
         if (coverArtId.isBlank()) return ""
-        val safeSize = size.coerceIn(100, 180)
+        val safeSize = size.coerceIn(100, 360)
         return buildUrl("getCoverArt", listOf("id" to coverArtId, "size" to safeSize.toString()), json = false)
+    }
+
+    /** Rebuilds a signed cover URL from [coverArtId], preserving non-Subsonic external URLs cleanly. */
+    fun resolveCoverUrl(coverArtId: String, fallbackUrl: String = "", size: Int = 180): String {
+        if (coverArtId.isNotBlank()) return coverUrl(coverArtId, size)
+        return if (fallbackUrl.isNotBlank() && !fallbackUrl.contains("/rest/")) fallbackUrl else ""
     }
 
     /**
@@ -959,6 +965,10 @@ class SubsonicApi(
         }
         val finalArtist = cleanArtist.ifBlank { "Neznámy interpret" }
 
+        val rgObj = o.optJSONObject("replayGain")
+        val rgTrack = rgObj?.takeIf { it.has("trackGain") }?.optDouble("trackGain")?.takeIf { !it.isNaN() }?.toFloat()
+        val rgAlbum = rgObj?.takeIf { it.has("albumGain") }?.optDouble("albumGain")?.takeIf { !it.isNaN() }?.toFloat()
+
         return TrackItem(
             id = id,
             title = cleanTitle,
@@ -966,7 +976,7 @@ class SubsonicApi(
             album = cleanAlbum,
             duration = formatDuration(durationSec),
             badge = badge,
-            imageUrl = coverUrl(cover, 600),
+            imageUrl = coverUrl(cover, 360),
             playCount = if (plays > 0) "$plays prehratí" else null,
             isLiked = o.has("starred"),
             isHiResBadgeCyan = lossless,
@@ -979,7 +989,9 @@ class SubsonicApi(
             samplingRate = samplingRate,
             year = o.optInt("year"),
             coverArtId = cover,
-            techLine = techParts.joinToString(" • ")
+            techLine = techParts.joinToString(" • "),
+            replayGainTrackDb = rgTrack,
+            replayGainAlbumDb = rgAlbum
         )
     }
 
@@ -1005,7 +1017,8 @@ class SubsonicApi(
             subtitle = subtitle,
             techSpec = spec,
             badge = "",
-            imageUrl = coverUrl(cover, 500)
+            imageUrl = coverUrl(cover, 240),
+            coverArtId = cover
         )
     }
 
@@ -1017,7 +1030,8 @@ class SubsonicApi(
             id = "ar:$id",
             name = o.optString("name").ifBlank { "Neznámy interpret" },
             trackCount = if (albums > 0) "$albums ${plural(albums, "album", "albumy", "albumov")}" else "",
-            imageUrl = coverUrl(cover, 500)
+            imageUrl = coverUrl(cover, 240),
+            coverArtId = cover
         )
     }
 
@@ -1033,7 +1047,8 @@ class SubsonicApi(
             subtitle = if (owner.isNotBlank()) owner else o.optString("comment"),
             trackCount = "$songs ${plural(songs, "skladba", "skladby", "skladieb")}",
             durationOrExtra = if (dur > 0) formatTotal(dur) else "",
-            imageUrl = coverUrl(cover, 400)
+            imageUrl = coverUrl(cover, 240),
+            coverArtId = cover
         )
     }
 
@@ -1051,14 +1066,50 @@ class SubsonicApi(
         private val LOSSLESS_SUFFIXES = setOf("flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff")
         private val ARTIST_FEAT_SPLIT_REGEX = Regex("(?i)\\s+(feat\\.?|ft\\.?|with|vs\\.?)\\s+|[,;/&]")
 
-        /** "192.168.1.5:4533/" -> "http://192.168.1.5:4533". Keeps https:// if the user typed it. */
+        /**
+         * Normalizes user-entered server addresses:
+         * - Public domains without scheme default to `https://` so auth tokens aren't sent in cleartext.
+         * - Private LAN / Tailscale / localhost / `.local` hosts default to `http://`.
+         * - Explicit `http://` or `https://` is always preserved.
+         */
         fun normalizeUrl(input: String): String {
             var s = input.trim()
             if (s.isEmpty()) return ""
             if (!s.startsWith("http://", ignoreCase = true) && !s.startsWith("https://", ignoreCase = true)) {
-                s = "http://$s"
+                val hostPart = s.substringBefore('/').substringBefore(':').lowercase(Locale.ROOT)
+                val scheme = if (isLocalOrPrivateHost(hostPart)) "http" else "https"
+                s = "$scheme://$s"
             }
             return s.trimEnd('/')
+        }
+
+        private fun isLocalOrPrivateHost(host: String): Boolean {
+            if (host == "localhost" || host == "127.0.0.1" || host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".home")) {
+                return true
+            }
+            val octets = host.split('.')
+            if (octets.size == 4 && octets.all { it.toIntOrNull() in 0..255 }) {
+                val a = octets[0].toInt()
+                val b = octets[1].toInt()
+                return a == 10 ||
+                    a == 127 ||
+                    (a == 192 && b == 168) ||
+                    (a == 172 && b in 16..31) ||
+                    (a == 100 && b in 64..127)
+            }
+            return false
+        }
+
+        /** Removes tokenized Subsonic query credentials before persisting URLs to local storage. */
+        fun sanitizeStoredUrl(url: String): String {
+            if (url.isBlank()) return ""
+            return if (url.contains("/rest/", ignoreCase = true) &&
+                (url.contains("t=") || url.contains("&s="))
+            ) {
+                ""
+            } else {
+                url
+            }
         }
 
         fun md5(input: String): String {
@@ -1136,7 +1187,8 @@ fun AlbumItem.toRow(): PlaylistItem = PlaylistItem(
     title = title,
     subtitle = subtitle,
     trackCount = techSpec,
-    imageUrl = imageUrl
+    imageUrl = imageUrl,
+    coverArtId = coverArtId
 )
 
 fun ArtistItem.toRow(): PlaylistItem = PlaylistItem(
@@ -1144,5 +1196,6 @@ fun ArtistItem.toRow(): PlaylistItem = PlaylistItem(
     title = name,
     subtitle = "Interpret",
     trackCount = trackCount,
-    imageUrl = imageUrl
+    imageUrl = imageUrl,
+    coverArtId = coverArtId
 )

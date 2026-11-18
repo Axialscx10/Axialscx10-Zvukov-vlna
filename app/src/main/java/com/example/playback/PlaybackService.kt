@@ -1,42 +1,141 @@
 package com.example.playback
 
+import android.app.ActivityManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes as PlatformAudioAttributes
-import android.media.AudioDeviceCallback
-import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.MainActivity
+import com.example.data.SleepTimerOption
+import com.example.isTelevision
 import com.example.widget.SoundWaveWidgetProvider
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+data class SleepTimerState(
+    val option: SleepTimerOption = SleepTimerOption.OFF,
+    val remainingSec: Int = 0,
+    val expiredMessage: String? = null
+)
+
+/**
+ * Shared sleep timer controller driven by [PlaybackService] so timers survive Activity
+ * destruction and reliably pause playback even when the UI is swiped away.
+ */
+object SleepTimerCoordinator {
+    private val _state = MutableStateFlow(SleepTimerState())
+    val state: StateFlow<SleepTimerState> = _state.asStateFlow()
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var remainingSec = 0
+    private var onExpirePause: (() -> Unit)? = null
+
+    private val tickRunnable = object : Runnable {
+        override fun run() {
+            if (_state.value.option == SleepTimerOption.OFF ||
+                _state.value.option == SleepTimerOption.END_OF_TRACK
+            ) {
+                return
+            }
+            if (remainingSec > 1) {
+                remainingSec--
+                _state.value = _state.value.copy(remainingSec = remainingSec)
+                handler.postDelayed(this, 1000L)
+            } else {
+                remainingSec = 0
+                onExpirePause?.invoke()
+                _state.value = SleepTimerState(
+                    option = SleepTimerOption.OFF,
+                    remainingSec = 0,
+                    expiredMessage = "Časovač spánku: Čas vypršal, prehrávanie bolo pozastavené."
+                )
+            }
+        }
+    }
+
+    internal fun attachPauseCallback(pauseFn: (() -> Unit)?) {
+        onExpirePause = pauseFn
+    }
+
+    fun setTimer(option: SleepTimerOption) {
+        handler.removeCallbacks(tickRunnable)
+        when (option) {
+            SleepTimerOption.OFF -> {
+                remainingSec = 0
+                _state.value = SleepTimerState(SleepTimerOption.OFF, 0, null)
+            }
+            SleepTimerOption.END_OF_TRACK -> {
+                remainingSec = -1
+                _state.value = SleepTimerState(SleepTimerOption.END_OF_TRACK, -1, null)
+            }
+            else -> {
+                remainingSec = option.minutes * 60
+                _state.value = SleepTimerState(option, remainingSec, null)
+                handler.postDelayed(tickRunnable, 1000L)
+            }
+        }
+    }
+
+    internal fun handleAutoTrackTransition(): Boolean {
+        if (_state.value.option == SleepTimerOption.END_OF_TRACK) {
+            onExpirePause?.invoke()
+            _state.value = SleepTimerState(
+                option = SleepTimerOption.OFF,
+                remainingSec = 0,
+                expiredMessage = "Časovač spánku: Prehrávanie bolo pozastavené po skončení skladby."
+            )
+            return true
+        }
+        return false
+    }
+
+    fun consumeExpiredMessage() {
+        if (_state.value.expiredMessage != null) {
+            _state.value = _state.value.copy(expiredMessage = null)
+        }
+    }
+
+    internal fun clearCallbacksOnDestroy() {
+        onExpirePause = null
+        handler.removeCallbacks(tickRunnable)
+    }
+}
 
 /**
  * Background playback service owning ExoPlayer and MediaSession.
  *
- * Engineered to eliminate the Car Bluetooth Pause -> Play volume drop bug (v31.0):
- * 1. Dynamically detects Bluetooth audio routing (`TYPE_BLUETOOTH_A2DP`, `TYPE_BLE_HEADSET`, etc.)
- *    and detaches all hardware `AudioEffect`s (`libbundlewrapper.so` / `Equalizer`) so Android's
- *    `AudioFlinger` uses the direct `FastMixer` A2DP path with zero DRC/limiter attenuation.
- * 2. Uses a single persistent `AudioFocusRequest(AUDIOFOCUS_GAIN)` with `.setWillPauseWhenDucked(true)`
- *    and NEVER abandons audio focus on Pause or mid-resume (`onIsPlayingChanged(true)`), preventing
- *    Android's `MediaFocusControl` and car AVRCP head units from ducking the stream during transitions.
- * 3. Performs an automatic 35ms `AudioTrack` wake-up re-trigger (`pause` -> `play` + native volume flush)
- *    150ms after resuming from a pause over Bluetooth so the car A2DP sink wakes up and locks onto
- *    100% normal volume on the very first press of Play.
+ * Key architecture & stability fixes (v32.0):
+ * 1. Uses a shared 256 MB LRU [SimpleCache] + [OkHttpDataSource] with generous timeouts and 8 retries
+ *    so mobile 5G handovers or brief tunnels in the car do not drop playback.
+ * 2. Registers [ConnectivityManager.NetworkCallback] to auto-resume from the exact position when
+ *    connectivity recovers after a temporary [PlaybackException] network outage.
+ * 3. Keeps hardware EQ / BassBoost active over Bluetooth & Car stereos by default; only bypasses DSP
+ *    when the user manually turns on the Emergency Car Stabilizer toggle.
+ * 4. Removes the 35ms pause->play Bluetooth retrigger glitch and `ADJUST_UNMUTE` system override.
  */
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
@@ -44,66 +143,26 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
     private var audioManager: AudioManager? = null
+    private var connectivityManager: ConnectivityManager? = null
     private var focusRequest: AudioFocusRequest? = null
     private var hasAudioFocus: Boolean = false
     private var resumeOnFocusGain: Boolean = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Tracks user-initiated pauses so we can perform the post-pause Bluetooth A2DP wake-up handshake
-    private var lastPausedAtElapsedMs: Long = 0L
-    private var wasPausedSinceLastPlay: Boolean = false
-    private var isInternalBtRetrigger: Boolean = false
+    private var pendingNetworkRecovery: Boolean = false
+    private var networkRecoveryAttempts: Int = 0
 
-    private val btRetriggerPauseRunnable = Runnable {
-        if (!::player.isInitialized || !player.playWhenReady) return@Runnable
-        try {
-            isInternalBtRetrigger = true
-            player.pause()
-            mainHandler.postDelayed(btRetriggerPlayRunnable, 35L)
-        } catch (_: Throwable) {
-            isInternalBtRetrigger = false
-        }
+    private val networkRetryRunnable = Runnable {
+        attemptNetworkRecovery("delayed_retry")
     }
 
-    private val btRetriggerPlayRunnable = Runnable {
-        if (!::player.isInitialized) {
-            isInternalBtRetrigger = false
-            return@Runnable
-        }
-        try {
-            ensureAudioFocus()
-            player.play()
-            forceApplyNativeVolume()
-        } catch (_: Throwable) {
-        } finally {
-            isInternalBtRetrigger = false
-        }
-    }
-
-    private val volumeRestoreRunnable120 = Runnable {
-        if (::player.isInitialized && (player.playWhenReady || isInternalBtRetrigger)) {
-            forceApplyNativeVolume()
-            AudioEffectsManager.onPlaybackResumed()
-        }
-    }
-    private val volumeRestoreRunnable350 = Runnable {
-        if (::player.isInitialized && player.playWhenReady) {
-            forceApplyNativeVolume()
-        }
-    }
-    private val volumeRestoreRunnable700 = Runnable {
-        if (::player.isInitialized && player.playWhenReady) {
-            forceApplyNativeVolume()
-        }
-    }
-
-    private val audioDeviceCallback = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
-            syncBluetoothOutputState()
-        }
-
-        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
-            syncBluetoothOutputState()
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            if (pendingNetworkRecovery) {
+                mainHandler.post {
+                    attemptNetworkRecovery("network_available")
+                }
+            }
         }
     }
 
@@ -112,6 +171,7 @@ class PlaybackService : MediaSessionService() {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasAudioFocus = false
                 resumeOnFocusGain = false
+                cancelNetworkRecovery()
                 if (::player.isInitialized && player.isPlaying) {
                     player.pause()
                 }
@@ -127,8 +187,8 @@ class PlaybackService : MediaSessionService() {
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 if (::player.isInitialized) {
-                    if (AudioEffectsManager.shouldBypassHardwareDsp() || isBluetoothOutputActive()) {
-                        forceApplyNativeVolume()
+                    if (AudioEffectsManager.isBluetoothVolumeStabilizerEnabled()) {
+                        applyPlayerVolume()
                     } else {
                         val ducked = (AudioEffectsManager.computePlayerVolume() * 0.35f).coerceIn(0.1f, 1.0f)
                         player.volume = ducked
@@ -138,7 +198,7 @@ class PlaybackService : MediaSessionService() {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
                 if (::player.isInitialized) {
-                    forceApplyNativeVolume()
+                    applyPlayerVolume()
                     if (resumeOnFocusGain) {
                         resumeOnFocusGain = false
                         player.play()
@@ -152,12 +212,37 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        syncBluetoothOutputState()
-        try {
-            audioManager?.registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
-        } catch (_: Throwable) {}
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        registerNetworkMonitor()
+
+        val isTv = isTelevision(this)
+        val isLowRam = (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true
+        val maxBufMs = if (isTv || isLowRam) 45_000 else 120_000
+        val minBufMs = if (isTv || isLowRam) 15_000 else 30_000
+
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ minBufMs,
+                /* maxBufferMs = */ maxBufMs,
+                /* bufferForPlaybackMs = */ 1_500,
+                /* bufferForPlaybackAfterRebufferMs = */ 4_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        val retryPolicy = object : DefaultLoadErrorHandlingPolicy(8) {
+            override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+                val backoff = ((loadErrorInfo.errorCount - 1).coerceAtLeast(0) * 1000L).coerceIn(800L, 5_000L)
+                return if (loadErrorInfo.errorCount <= 8) backoff else C.TIME_UNSET
+            }
+        }
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(MediaCacheManager.buildDataSourceFactory(this))
+            .setLoadErrorHandlingPolicy(retryPolicy)
 
         player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -169,62 +254,77 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
 
-        forceApplyNativeVolume()
+        applyPlayerVolume()
         AudioEffectsManager.setPlayerVolumeListener { _ ->
-            if (::player.isInitialized) {
-                forceApplyNativeVolume()
+            mainHandler.post {
+                if (::player.isInitialized) {
+                    applyPlayerVolume()
+                }
+            }
+        }
+
+        SleepTimerCoordinator.attachPauseCallback {
+            if (::player.isInitialized && (player.isPlaying || player.playWhenReady)) {
+                player.pause()
             }
         }
 
         try {
             AudioEffectsManager.attachAudioSession(player.audioSessionId)
-            player.addListener(object : Player.Listener {
-                override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                    try {
-                        syncBluetoothOutputState()
-                        AudioEffectsManager.attachAudioSession(audioSessionId)
-                        forceApplyNativeVolume()
-                    } catch (_: Throwable) {}
-                }
-            })
         } catch (_: Throwable) {}
 
         player.addListener(object : Player.Listener {
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (isInternalBtRetrigger) return
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                try {
+                    AudioEffectsManager.attachAudioSession(audioSessionId)
+                    applyPlayerVolume()
+                } catch (_: Throwable) {}
+            }
 
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (playWhenReady) {
-                    syncBluetoothOutputState()
                     ensureAudioFocus()
-                    val now = SystemClock.elapsedRealtime()
-                    val pauseDurationMs = if (lastPausedAtElapsedMs > 0L) now - lastPausedAtElapsedMs else 0L
-                    val shouldRetriggerBt = wasPausedSinceLastPlay &&
-                        pauseDurationMs >= 500L &&
-                        (isBluetoothOutputActive() || AudioEffectsManager.isBluetoothVolumeStabilizerEnabled())
-                    wasPausedSinceLastPlay = false
-                    schedulePostResumeVolumeLock(triggerBtHandshake = shouldRetriggerBt)
+                    applyPlayerVolume()
+                    AudioEffectsManager.onPlaybackResumed()
                 } else {
-                    cancelPostResumeVolumeLock()
-                    wasPausedSinceLastPlay = true
-                    lastPausedAtElapsedMs = SystemClock.elapsedRealtime()
-                    // Note: Do NOT abandon AudioFocus on user Pause! Keeping AUDIOFOCUS_GAIN while
-                    // paused prevents the car head unit and Android AudioFlinger from demoting or
-                    // ducking our session during Pause -> Play.
+                    cancelNetworkRecovery()
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    cancelNetworkRecovery()
+                    applyPlayerVolume()
                 }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isInternalBtRetrigger) return
                 if (isPlaying) {
                     ensureAudioFocus()
-                    forceApplyNativeVolume()
+                    applyPlayerVolume()
                 }
                 notifyWidgetUpdate()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                forceApplyNativeVolume()
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                    SleepTimerCoordinator.handleAutoTrackTransition()
+                }
+                syncReplayGainFromMediaItem(mediaItem)
+                applyPlayerVolume()
                 notifyWidgetUpdate()
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (isRecoverableNetworkError(error) && player.playWhenReady && networkRecoveryAttempts < MAX_AUTO_RECOVERY_ATTEMPTS) {
+                    pendingNetworkRecovery = true
+                    networkRecoveryAttempts++
+                    val delayMs = (2500L * networkRecoveryAttempts).coerceAtMost(12_000L)
+                    mainHandler.removeCallbacks(networkRetryRunnable)
+                    mainHandler.postDelayed(networkRetryRunnable, delayMs)
+                } else {
+                    cancelNetworkRecovery()
+                }
             }
         })
 
@@ -240,77 +340,61 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
-    private fun isBluetoothOutputActive(): Boolean {
-        val am = audioManager ?: return false
-        return try {
-            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            devices.any { dev ->
-                dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
-                    dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && (
-                        dev.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                            dev.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
-                        )) ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        dev.type == AudioDeviceInfo.TYPE_BLE_BROADCAST)
-            }
-        } catch (_: Throwable) {
-            false
+    private fun isRecoverableNetworkError(error: PlaybackException): Boolean {
+        return when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+            PlaybackException.ERROR_CODE_TIMEOUT -> true
+            else -> error.errorCodeName.contains("NETWORK", ignoreCase = true)
         }
     }
 
-    private fun syncBluetoothOutputState() {
-        val btConnected = isBluetoothOutputActive()
-        AudioEffectsManager.setBluetoothOutputConnected(btConnected)
+    private fun attemptNetworkRecovery(@Suppress("UNUSED_PARAMETER") source: String) {
+        if (!::player.isInitialized || !pendingNetworkRecovery) return
+        if (!player.playWhenReady || player.mediaItemCount == 0) {
+            cancelNetworkRecovery()
+            return
+        }
+        val idx = player.currentMediaItemIndex.coerceIn(0, player.mediaItemCount - 1)
+        val pos = player.currentPosition.coerceAtLeast(0L)
+        ensureAudioFocus()
+        player.seekTo(idx, pos)
+        player.prepare()
+        player.play()
     }
 
-    /**
-     * Forces ExoPlayer to send `MSG_SET_VOLUME` to `DefaultAudioSink` / native `AudioTrack`
-     * even when `player.volume` already equals `targetVol`, and ensures the system music stream
-     * is unmuted when resuming over Car Bluetooth AVRCP.
-     */
-    private fun forceApplyNativeVolume() {
+    private fun cancelNetworkRecovery() {
+        pendingNetworkRecovery = false
+        networkRecoveryAttempts = 0
+        mainHandler.removeCallbacks(networkRetryRunnable)
+    }
+
+    private fun registerNetworkMonitor() {
+        val cm = connectivityManager ?: return
+        try {
+            val req = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            cm.registerNetworkCallback(req, networkCallback)
+        } catch (_: Throwable) {}
+    }
+
+    private fun syncReplayGainFromMediaItem(mediaItem: MediaItem?) {
+        val extras = mediaItem?.mediaMetadata?.extras
+        val trackDb = if (extras != null && extras.containsKey("rgTrack")) extras.getFloat("rgTrack") else null
+        val albumDb = if (extras != null && extras.containsKey("rgAlbum")) extras.getFloat("rgAlbum") else null
+        AudioEffectsManager.setActiveTrackReplayGain(trackDb, albumDb)
+    }
+
+    private fun applyPlayerVolume() {
         if (!::player.isInitialized) return
         val targetVol = AudioEffectsManager.computePlayerVolume().coerceIn(0.1f, 1.0f)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && player.playWhenReady) {
-                audioManager?.adjustStreamVolume(
-                    AudioManager.STREAM_MUSIC,
-                    AudioManager.ADJUST_UNMUTE,
-                    0
-                )
-            }
-        } catch (_: Throwable) {}
-
-        val nudge = if (targetVol >= 0.999f) 0.998f else (targetVol + 0.001f)
-        player.volume = nudge
-        player.volume = targetVol
-    }
-
-    private fun schedulePostResumeVolumeLock(triggerBtHandshake: Boolean) {
-        forceApplyNativeVolume()
-        cancelPostResumeVolumeLock()
-        mainHandler.postDelayed(volumeRestoreRunnable120, 120L)
-        if (triggerBtHandshake) {
-            mainHandler.postDelayed(btRetriggerPauseRunnable, 150L)
+        if (kotlin.math.abs(player.volume - targetVol) > 0.001f) {
+            player.volume = targetVol
         }
-        mainHandler.postDelayed(volumeRestoreRunnable350, 350L)
-        mainHandler.postDelayed(volumeRestoreRunnable700, 700L)
     }
 
-    private fun cancelPostResumeVolumeLock() {
-        mainHandler.removeCallbacks(btRetriggerPauseRunnable)
-        mainHandler.removeCallbacks(btRetriggerPlayRunnable)
-        mainHandler.removeCallbacks(volumeRestoreRunnable120)
-        mainHandler.removeCallbacks(volumeRestoreRunnable350)
-        mainHandler.removeCallbacks(volumeRestoreRunnable700)
-        isInternalBtRetrigger = false
-    }
-
-    /**
-     * Requests `AUDIOFOCUS_GAIN` using a single persistent `AudioFocusRequest` with
-     * `.setWillPauseWhenDucked(true)` without ever abandoning focus mid-playback.
-     */
     private fun ensureAudioFocus() {
         val am = audioManager ?: return
         try {
@@ -322,7 +406,8 @@ class PlaybackService : MediaSessionService() {
                             .setContentType(PlatformAudioAttributes.CONTENT_TYPE_MUSIC)
                             .build()
                     )
-                    .setWillPauseWhenDucked(true)
+                    // False allows AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK callback to reach our listener
+                    .setWillPauseWhenDucked(false)
                     .setOnAudioFocusChangeListener(audioFocusListener, mainHandler)
                     .build()
                     .also { focusRequest = it }
@@ -357,32 +442,37 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        if (action != null) {
+        if (action != null && ::player.isInitialized) {
             when (action) {
                 SoundWaveWidgetProvider.ACTION_PLAY_PAUSE -> {
                     if (player.isPlaying) {
                         player.pause()
-                    } else {
-                        if (player.mediaItemCount > 0) {
-                            ensureAudioFocus()
-                            player.play()
+                    } else if (player.mediaItemCount > 0) {
+                        ensureAudioFocus()
+                        if (player.playbackState == Player.STATE_IDLE) {
+                            player.prepare()
                         }
+                        player.play()
                     }
                     notifyWidgetUpdate()
                 }
                 SoundWaveWidgetProvider.ACTION_PREV -> {
-                    if (player.hasPreviousMediaItem()) {
-                        player.seekToPreviousMediaItem()
-                    } else {
-                        player.seekTo(0L)
+                    if (player.mediaItemCount > 0) {
+                        if (player.hasPreviousMediaItem()) {
+                            player.seekToPreviousMediaItem()
+                        } else {
+                            player.seekTo(0L)
+                        }
+                        notifyWidgetUpdate()
                     }
-                    notifyWidgetUpdate()
                 }
                 SoundWaveWidgetProvider.ACTION_NEXT -> {
-                    if (player.hasNextMediaItem()) {
-                        player.seekToNextMediaItem()
+                    if (player.mediaItemCount > 0) {
+                        if (player.hasNextMediaItem()) {
+                            player.seekToNextMediaItem()
+                        }
+                        notifyWidgetUpdate()
                     }
-                    notifyWidgetUpdate()
                 }
             }
         }
@@ -406,10 +496,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
-        cancelPostResumeVolumeLock()
+        cancelNetworkRecovery()
         try {
-            audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
+            connectivityManager?.unregisterNetworkCallback(networkCallback)
         } catch (_: Throwable) {}
+        SleepTimerCoordinator.clearCallbacksOnDestroy()
         AudioEffectsManager.setPlayerVolumeListener(null)
         abandonSmartAudioFocus()
         AudioEffectsManager.releaseEffects()
@@ -419,5 +510,9 @@ class PlaybackService : MediaSessionService() {
         }
         mediaSession = null
         super.onDestroy()
+    }
+
+    companion object {
+        private const val MAX_AUTO_RECOVERY_ATTEMPTS = 5
     }
 }

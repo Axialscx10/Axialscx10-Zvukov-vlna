@@ -1,21 +1,7 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
-
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
-  alias(libs.plugins.secrets)
-  alias(libs.plugins.google.services)
-}
-
-googleServices {
-  missingGoogleServicesStrategy = MissingGoogleServicesStrategy.IGNORE
-}
-
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
 }
 
 android {
@@ -26,8 +12,8 @@ android {
     applicationId = "com.aistudio.soundwave.nctrn"
     minSdk = 24
     targetSdk = 36
-    versionCode = 31
-    versionName = "31.0"
+    versionCode = 32
+    versionName = "32.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -35,16 +21,15 @@ android {
   signingConfigs {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      val ksFile = file(keystorePath)
+      val storePwd = System.getenv("STORE_PASSWORD")
+      val keyPwd = System.getenv("KEY_PASSWORD")
+      if (ksFile.exists() && !storePwd.isNullOrBlank() && !keyPwd.isNullOrBlank()) {
+        storeFile = ksFile
+        storePassword = storePwd
+        keyAlias = "upload"
+        keyPassword = keyPwd
+      }
     }
   }
 
@@ -57,10 +42,27 @@ android {
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro"
       )
-      signingConfig = signingConfigs.getByName("release")
+      val releaseSign = signingConfigs.getByName("release")
+      if (releaseSign.storeFile != null) {
+        signingConfig = releaseSign
+      }
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // Uses Android SDK's default debug keystore (~/.android/debug.keystore) so clean clones build immediately
+    }
+  }
+
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+    }
+  }
+
+  configurations.matching { it.name.contains("UnitTest") }.configureEach {
+    resolutionStrategy.eachDependency {
+      if (requested.group == "org.ow2.asm") {
+        useVersion("9.9")
+      }
     }
   }
 
@@ -93,12 +95,15 @@ dependencies {
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.session)
   implementation(libs.androidx.media3.ui)
+  implementation(libs.androidx.media3.datasource.okhttp)
+  implementation(libs.androidx.media3.database)
 
   // Networking & Image loading
   implementation(libs.okhttp)
   implementation(libs.coil.compose)
 
   testImplementation(libs.junit)
+  testImplementation(libs.androidx.test.core)
   testImplementation(libs.robolectric)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.espresso.core)
@@ -109,12 +114,9 @@ dependencies {
 tasks.register<Copy>("exportDebugApk") {
   from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
   into("${rootDir}/store-assets")
-  rename { "SoundWave-v31.0.apk" }
+  rename { "SoundWave-v${android.defaultConfig.versionName}.apk" }
   doFirst {
-    file("${rootDir}/store-assets/SoundWave-v17.0-build17.apk").delete()
-    file("${rootDir}/store-assets/SoundWave-v28.0.apk").delete()
-    file("${rootDir}/store-assets/SoundWave-v29.0.apk").delete()
-    file("${rootDir}/store-assets/SoundWave-v30.0.apk").delete()
+    file("${rootDir}/store-assets").listFiles()?.filter { it.extension == "apk" }?.forEach { it.delete() }
   }
 }
 

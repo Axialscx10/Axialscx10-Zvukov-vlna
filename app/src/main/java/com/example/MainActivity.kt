@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import android.view.KeyEvent
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -66,6 +67,7 @@ fun isTelevision(context: Context): Boolean {
         return true
     }
     val pm = context.packageManager
+    @Suppress("DEPRECATION")
     return pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
            pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
            !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
@@ -263,6 +265,7 @@ fun SoundWaveApp(
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .focusGroup()
                     .focusRequester(contentFocusRequester)
             ) {
                 when (val screen = uiState.currentScreen) {

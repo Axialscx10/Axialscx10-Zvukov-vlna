@@ -3,12 +3,15 @@ package com.example.data
 import android.content.Context
 import android.os.Environment
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
+import kotlin.coroutines.coroutineContext
 
 /**
  * Handles downloading tracks for offline listening, storing audio files and metadata locally,
@@ -66,7 +69,15 @@ class OfflineManager(private val context: Context) {
                 return@withContext false
             }
 
-            val totalBytes = conn.contentLength.coerceAtLeast(1)
+            val contentType = conn.contentType.orEmpty().lowercase(Locale.ROOT)
+            if (contentType.startsWith("text/") ||
+                contentType.contains("application/json") ||
+                contentType.contains("application/xml")
+            ) {
+                return@withContext false
+            }
+
+            val totalBytes = conn.contentLengthLong
             var bytesReadTotal = 0L
 
             conn.inputStream.use { input ->
@@ -74,10 +85,11 @@ class OfflineManager(private val context: Context) {
                     val buffer = ByteArray(16 * 1024)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
+                        coroutineContext.ensureActive()
                         output.write(buffer, 0, read)
                         bytesReadTotal += read
-                        if (totalBytes > 0) {
-                            onProgress(bytesReadTotal.toFloat() / totalBytes)
+                        if (totalBytes > 0L) {
+                            onProgress((bytesReadTotal.toFloat() / totalBytes).coerceIn(0f, 1f))
                         }
                     }
                 }
@@ -92,6 +104,9 @@ class OfflineManager(private val context: Context) {
                 tempFile.delete()
                 false
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            tempFile.delete()
+            throw e
         } catch (e: Exception) {
             tempFile.delete()
             false
@@ -110,7 +125,7 @@ class OfflineManager(private val context: Context) {
                 put("album", track.album)
                 put("duration", track.duration)
                 put("badge", track.badge)
-                put("imageUrl", track.imageUrl)
+                put("imageUrl", SubsonicApi.sanitizeStoredUrl(track.imageUrl))
                 put("albumId", track.albumId)
                 put("artistId", track.artistId)
                 put("durationSec", track.durationSec)
@@ -152,7 +167,7 @@ class OfflineManager(private val context: Context) {
                                 album = json.optString("album", ""),
                                 duration = json.optString("duration", "0:00"),
                                 badge = json.optString("badge", "OFFLINE"),
-                                imageUrl = json.optString("imageUrl", ""),
+                                imageUrl = SubsonicApi.sanitizeStoredUrl(json.optString("imageUrl", "")),
                                 isDownloaded = true,
                                 isHiResBadgeCyan = json.optBoolean("isHiResBadgeCyan", true),
                                 albumId = json.optString("albumId", ""),

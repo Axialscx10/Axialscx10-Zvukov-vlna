@@ -6,7 +6,9 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.widget.RemoteViews
+import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 
@@ -23,21 +25,31 @@ class SoundWaveWidgetProvider : AppWidgetProvider() {
         val action = intent.action ?: return
         when (action) {
             ACTION_PLAY_PAUSE, ACTION_PREV, ACTION_NEXT -> {
-                // Forward control action to PlaybackService
                 val serviceIntent = Intent(context, com.example.playback.PlaybackService::class.java).apply {
                     this.action = action
                 }
                 try {
-                    context.startService(serviceIntent)
-                } catch (_: Throwable) {}
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        ContextCompat.startForegroundService(context, serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                } catch (_: Throwable) {
+                    // Android 12+ background restriction if service is not active: open UI to resume safely
+                    try {
+                        context.startActivity(
+                            Intent(context, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            }
+                        )
+                    } catch (_: Throwable) {}
+                }
             }
             ACTION_UPDATE_STATE -> {
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: "SoundWave"
                 val artist = intent.getStringExtra(EXTRA_ARTIST) ?: "Pripravené na prehrávanie"
                 val isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false)
-                currentTitle = title
-                currentArtist = artist
-                SoundWaveWidgetProvider.isPlaying = isPlaying
+                savePersistedState(context, title, artist, isPlaying)
 
                 val appWidgetManager = AppWidgetManager.getInstance(context)
                 val thisWidget = ComponentName(context, SoundWaveWidgetProvider::class.java)
@@ -59,34 +71,52 @@ class SoundWaveWidgetProvider : AppWidgetProvider() {
         const val EXTRA_ARTIST = "extra_artist"
         const val EXTRA_IS_PLAYING = "extra_is_playing"
 
-        private var currentTitle: String = "SoundWave"
-        private var currentArtist: String = "Navidrome Hi-Fi"
-        private var isPlaying: Boolean = false
+        private const val PREFS_NAME = "soundwave_widget_prefs"
+        private const val KEY_TITLE = "widget_title"
+        private const val KEY_ARTIST = "widget_artist"
+        private const val KEY_PLAYING = "widget_playing"
+
+        private fun savePersistedState(context: Context, title: String, artist: String, playing: Boolean) {
+            context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_TITLE, title)
+                .putString(KEY_ARTIST, artist)
+                .putBoolean(KEY_PLAYING, playing)
+                .apply()
+        }
+
+        private fun loadPersistedState(context: Context): Triple<String, String, Boolean> {
+            val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val title = prefs.getString(KEY_TITLE, "SoundWave") ?: "SoundWave"
+            val artist = prefs.getString(KEY_ARTIST, "Navidrome Hi-Fi") ?: "Navidrome Hi-Fi"
+            val playing = prefs.getBoolean(KEY_PLAYING, false)
+            return Triple(title, artist, playing)
+        }
 
         fun updateWidgetState(context: Context, title: String, artist: String, playing: Boolean) {
-            currentTitle = title.ifBlank { "SoundWave" }
-            currentArtist = artist.ifBlank { "Navidrome Hi-Fi" }
-            isPlaying = playing
+            val safeTitle = title.ifBlank { "SoundWave" }
+            val safeArtist = artist.ifBlank { "Navidrome Hi-Fi" }
+            savePersistedState(context, safeTitle, safeArtist, playing)
 
             val intent = Intent(context, SoundWaveWidgetProvider::class.java).apply {
                 action = ACTION_UPDATE_STATE
-                putExtra(EXTRA_TITLE, currentTitle)
-                putExtra(EXTRA_ARTIST, currentArtist)
-                putExtra(EXTRA_IS_PLAYING, isPlaying)
+                putExtra(EXTRA_TITLE, safeTitle)
+                putExtra(EXTRA_ARTIST, safeArtist)
+                putExtra(EXTRA_IS_PLAYING, playing)
             }
             context.sendBroadcast(intent)
         }
 
         private fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
+            val (title, artist, playing) = loadPersistedState(context)
             val views = RemoteViews(context.packageName, R.layout.soundwave_widget_layout)
 
-            views.setTextViewText(R.id.widget_title, currentTitle)
-            views.setTextViewText(R.id.widget_artist, currentArtist)
+            views.setTextViewText(R.id.widget_title, title)
+            views.setTextViewText(R.id.widget_artist, artist)
 
-            val playIcon = if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
+            val playIcon = if (playing) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
             views.setImageViewResource(R.id.widget_btn_play, playIcon)
 
-            // Open app on click
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -96,7 +126,6 @@ class SoundWaveWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent)
 
-            // Action intents
             views.setOnClickPendingIntent(R.id.widget_btn_play, getActionPendingIntent(context, ACTION_PLAY_PAUSE, 1))
             views.setOnClickPendingIntent(R.id.widget_btn_prev, getActionPendingIntent(context, ACTION_PREV, 2))
             views.setOnClickPendingIntent(R.id.widget_btn_next, getActionPendingIntent(context, ACTION_NEXT, 3))

@@ -45,6 +45,11 @@ class SettingsStore(context: Context) {
         prefs.edit()
             .remove(KEY_TOKEN)
             .remove(KEY_SALT)
+            .remove(KEY_LAST_TRACK)
+            .remove(KEY_LAST_POSITION_MS)
+            .remove(KEY_LAST_QUEUE)
+            .remove(KEY_LAST_QUEUE_INDEX)
+            .remove(KEY_HISTORY)
             .apply()
     }
 
@@ -100,7 +105,8 @@ class SettingsStore(context: Context) {
         put("album", t.album)
         put("duration", t.duration)
         put("badge", t.badge)
-        put("imageUrl", t.imageUrl)
+        // Never persist Subsonic query tokens (t/s) to SharedPreferences; rebuild from coverArtId at runtime
+        put("imageUrl", SubsonicApi.sanitizeStoredUrl(t.imageUrl))
         put("albumId", t.albumId)
         put("artistId", t.artistId)
         put("durationSec", t.durationSec)
@@ -112,6 +118,8 @@ class SettingsStore(context: Context) {
         put("coverArtId", t.coverArtId)
         put("techLine", t.techLine)
         put("isHiResBadgeCyan", t.isHiResBadgeCyan)
+        if (t.replayGainTrackDb != null) put("rgTrack", t.replayGainTrackDb.toDouble())
+        if (t.replayGainAlbumDb != null) put("rgAlbum", t.replayGainAlbumDb.toDouble())
     }
 
     private fun trackFromJson(obj: JSONObject): TrackItem = TrackItem(
@@ -121,7 +129,7 @@ class SettingsStore(context: Context) {
         album = obj.optString("album", ""),
         duration = obj.optString("duration", "0:00"),
         badge = obj.optString("badge", ""),
-        imageUrl = obj.optString("imageUrl", ""),
+        imageUrl = SubsonicApi.sanitizeStoredUrl(obj.optString("imageUrl", "")),
         albumId = obj.optString("albumId", ""),
         artistId = obj.optString("artistId", ""),
         durationSec = obj.optInt("durationSec", 0),
@@ -132,7 +140,9 @@ class SettingsStore(context: Context) {
         year = obj.optInt("year", 0),
         coverArtId = obj.optString("coverArtId", ""),
         techLine = obj.optString("techLine", ""),
-        isHiResBadgeCyan = obj.optBoolean("isHiResBadgeCyan", true)
+        isHiResBadgeCyan = obj.optBoolean("isHiResBadgeCyan", true),
+        replayGainTrackDb = if (obj.has("rgTrack")) obj.optDouble("rgTrack").takeIf { !it.isNaN() }?.toFloat() else null,
+        replayGainAlbumDb = if (obj.has("rgAlbum")) obj.optDouble("rgAlbum").takeIf { !it.isNaN() }?.toFloat() else null
     )
 
     fun savePlaybackState(track: TrackItem, positionMs: Long, queue: List<TrackItem>, queueIndex: Int) {
@@ -255,6 +265,9 @@ class SettingsStore(context: Context) {
         const val KEY_SPATIAL = "eq_spatial_enabled"
         const val KEY_AUTO_GAIN = "eq_auto_gain_enabled"
         const val KEY_BT_STABILIZER = "bt_car_volume_stabilizer"
+        const val KEY_REPLAY_GAIN_ENABLED = "replay_gain_enabled"
+        const val KEY_REPLAY_GAIN_MODE = "replay_gain_mode"
+        const val KEY_REPLAY_GAIN_PREAMP = "replay_gain_preamp_db"
 
         private const val KEY_LAST_TRACK = "last_track_state"
         private const val KEY_LAST_POSITION_MS = "last_position_ms"

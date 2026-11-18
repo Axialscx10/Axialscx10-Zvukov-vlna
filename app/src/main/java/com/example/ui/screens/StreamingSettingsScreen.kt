@@ -552,6 +552,8 @@ fun StreamingSettingsScreen(
             val isRawOriginal = uiState.backendCodec == "FLAC Stream"
             val currentRate = uiState.opusBitrateTarget
             val activeQualitySummary = when {
+                isRawOriginal && uiState.cellularTranscodingEnabled ->
+                    "Originál / FLAC na Wi-Fi • Na mobilných dátach MP3 (${currentRate.replace("k", "")} kbps)"
                 isRawOriginal -> "Originál / FLAC (Bez straty kvality – Direct Play)"
                 uiState.backendCodec == "MP3 (LAME)" -> "Prekódovanie: MP3 • ${currentRate.replace("k", "")} kbps"
                 uiState.backendCodec == "Opus (libopus)" -> "Prekódovanie: Opus • ${currentRate.replace("k", "")} kbps"
@@ -777,7 +779,7 @@ fun StreamingSettingsScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "Keď nie si na Wi-Fi, automaticky zníži tok na MP3, aby sa nemíňali dáta",
+                                    text = "Keď nie si na Wi-Fi, automaticky prepne stream na MP3 podľa zvoleného dátového toku",
                                     color = OnSurfaceVariant,
                                     fontSize = 11.sp
                                 )

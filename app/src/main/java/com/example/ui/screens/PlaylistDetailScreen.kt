@@ -253,8 +253,7 @@ fun PlaylistDetailScreen(
         if (activeSubGenreSpec != null) {
             result = result.filter { SmartGenreCatalog.matchesTrack(it, activeSubGenreSpec) }
         }
-        if (selectedAlbumFilterId != null) {
-            val selId = selectedAlbumFilterId!!
+        selectedAlbumFilterId?.let { selId ->
             val rawAlbumId = selId.removePrefix("al:").removePrefix("al_group:")
             val selectedAlbumTitle = artistAlbums.find { it.id == selId }?.title ?: rawAlbumId
             result = result.filter { t ->
@@ -266,8 +265,7 @@ fun PlaylistDetailScreen(
                     (cleanAlb.isBlank() && t.title.startsWith("$selectedAlbumTitle -", ignoreCase = true))
             }
         }
-        if (selectedArtistFilterName != null) {
-            val targetArtist = selectedArtistFilterName!!
+        selectedArtistFilterName?.let { targetArtist ->
             result = result.filter { t ->
                 val cleanArt = t.artist.trim()
                 cleanArt.equals(targetArtist, ignoreCase = true) ||

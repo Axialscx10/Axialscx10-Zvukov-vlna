@@ -147,20 +147,36 @@ private object SoundWaveImageLoader {
         instance?.let { return it }
         return synchronized(this) {
             instance ?: run {
+                val appCtx = context.applicationContext
+                val isTv = com.example.isTelevision(appCtx)
+                val isLowRam = (appCtx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)?.isLowRamDevice == true
                 val dispatcher = okhttp3.Dispatcher().apply {
-                    maxRequests = 10
-                    maxRequestsPerHost = 4
+                    maxRequests = if (isTv) 6 else 10
+                    maxRequestsPerHost = if (isTv) 3 else 4
                 }
                 val okHttp = okhttp3.OkHttpClient.Builder()
                     .dispatcher(dispatcher)
-                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                    .retryOnConnectionFailure(true)
                     .build()
-                coil.ImageLoader.Builder(context.applicationContext)
+                coil.ImageLoader.Builder(appCtx)
                     .okHttpClient(okHttp)
+                    .memoryCache {
+                        coil.memory.MemoryCache.Builder(appCtx)
+                            .maxSizePercent(if (isTv || isLowRam) 0.12 else 0.22)
+                            .build()
+                    }
+                    .diskCache {
+                        coil.disk.DiskCache.Builder()
+                            .directory(java.io.File(appCtx.cacheDir, "image_cache"))
+                            .maxSizeBytes(if (isTv) 64L * 1024L * 1024L else 128L * 1024L * 1024L)
+                            .build()
+                    }
                     .bitmapConfig(android.graphics.Bitmap.Config.RGB_565)
                     .crossfade(false)
-                    .allowHardware(true)
+                    // Avoid hardware bitmaps on Android TV boxes where GPU rasterizer OOMs / glitches with Compose shadows
+                    .allowHardware(!isTv && !isLowRam)
                     .respectCacheHeaders(false)
                     .build()
                     .also { instance = it }

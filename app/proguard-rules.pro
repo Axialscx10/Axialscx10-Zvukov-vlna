@@ -8,9 +8,8 @@
 -keep public class com.example.playback.PlaybackService { *; }
 -keep public class com.example.widget.SoundWaveWidgetProvider { *; }
 
-# Keep Media3 / ExoPlayer classes accessed via reflection
+# Keep Media3 / OkHttp warnings clean while letting AAR consumer rules handle reflection
 -dontwarn androidx.media3.**
--keepclassmembers class androidx.media3.** { *; }
 
 # OkHttp / Okio
 -dontwarn okhttp3.**

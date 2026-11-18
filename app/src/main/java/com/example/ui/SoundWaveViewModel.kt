@@ -21,6 +21,10 @@ import androidx.media3.session.SessionToken
 import com.example.data.AlbumItem
 import com.example.data.AppScreen
 import com.example.data.ArtistItem
+import com.example.data.CachedExploreSnapshot
+import com.example.data.CachedHomeSnapshot
+import com.example.data.CachedLibrarySnapshot
+import com.example.data.CatalogCacheStore
 import com.example.data.CollectionDetail
 import com.example.data.GenreItem
 import com.example.data.HeadphoneProfile
@@ -37,6 +41,8 @@ import com.example.data.SubsonicApi
 import com.example.data.SubsonicException
 import com.example.data.TrackItem
 import com.example.playback.AudioEffectsManager
+import com.example.playback.MediaCacheManager
+import com.example.playback.SleepTimerCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -143,7 +149,7 @@ data class SoundWaveUiState(
     val subBassBoostDb: Float = 2.0f,
     val crossfeedEnabled: Boolean = false,
     val autoGainEnabled: Boolean = true,
-    val bluetoothVolumeStabilizerEnabled: Boolean = true,
+    val bluetoothVolumeStabilizerEnabled: Boolean = false,
 
     // AutoEQ Headphone Calibration State
     val autoEqSearchQuery: String = "",
@@ -154,7 +160,7 @@ data class SoundWaveUiState(
     val subBassCompensationEnabled: Boolean = true,
 
     // Streaming Quality & ffmpeg Server Settings State
-    val cellularTranscodingEnabled: Boolean = true,
+    val cellularTranscodingEnabled: Boolean = false,
     val opusBitrateTarget: String = "320k", // "64k", "128k", "192k", "256k", "320k", "Auto"
     val backendCodec: String = "FLAC Stream",
     val maxSampleRate: String = "48 kHz",
@@ -202,6 +208,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     private val settings = SettingsStore(app)
     private val offlineManager = OfflineManager(app)
+    private val catalogCache = CatalogCacheStore(app)
     private var api: SubsonicApi? = null
 
     private val _uiState = MutableStateFlow(buildState(settings.loadCredentials()))
@@ -220,13 +227,14 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     private var seekJob: Job? = null
     private var lyricsJob: Job? = null
     private var relatedJob: Job? = null
-    private var sleepTimerJob: Job? = null
     private var relatedLoadedFor: String = ""
     private var scrobbled = false
+    private var suppressInitialRestoreTransition = false
 
     init {
         connectController()
         startProgressLoop()
+        observeSleepTimer()
         refreshCacheSize()
         refreshDownloadedTracks()
         val initial = _uiState.value
@@ -235,10 +243,81 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         AudioEffectsManager.setSpatialEnabled(initial.crossfeedEnabled)
         AudioEffectsManager.setSubBassBoost(initial.subBassBoostDb)
         AudioEffectsManager.setBands(initial.eqBands, initial.preampDb)
+        AudioEffectsManager.setReplayGain(initial.replayGainEnabled, initial.replayGainPreampDb, initial.replayGainMode)
         AudioEffectsManager.setMasterEnabled(initial.eqMasterEnabled)
         settings.loadCredentials()?.let { c ->
-            api = SubsonicApi(c.url, c.username, c.token, c.salt)
-            viewModelScope.launch { verifyAndLoad() }
+            val createdApi = SubsonicApi(c.url, c.username, c.token, c.salt)
+            api = createdApi
+            rehydratePersistedTracks(createdApi)
+            viewModelScope.launch {
+                hydrateCatalogFromDiskCache(createdApi)
+                verifyAndLoad()
+            }
+        }
+    }
+
+    private fun observeSleepTimer() {
+        viewModelScope.launch {
+            SleepTimerCoordinator.state.collect { st ->
+                _uiState.update {
+                    it.copy(sleepTimerOption = st.option, sleepTimerRemainingSec = st.remainingSec)
+                }
+                st.expiredMessage?.let { msg ->
+                    showMessage(msg)
+                    SleepTimerCoordinator.consumeExpiredMessage()
+                }
+            }
+        }
+    }
+
+    private fun rehydrateTrack(a: SubsonicApi, t: TrackItem): TrackItem =
+        if (t.id.isBlank()) t else t.copy(imageUrl = a.resolveCoverUrl(t.coverArtId, t.imageUrl, 360))
+
+    private fun rehydratePersistedTracks(a: SubsonicApi) {
+        _uiState.update { st ->
+            st.copy(
+                currentTrack = rehydrateTrack(a, st.currentTrack),
+                queue = st.queue.map { rehydrateTrack(a, it) },
+                historyTracks = st.historyTracks.map { rehydrateTrack(a, it) }
+            )
+        }
+    }
+
+    private suspend fun hydrateCatalogFromDiskCache(a: SubsonicApi) = withContext(Dispatchers.IO) {
+        val cachedHome = catalogCache.loadHome(a)
+        val cachedLib = catalogCache.loadLibrary(a)
+        val cachedExp = catalogCache.loadExplore(a)
+        if (cachedHome != null || cachedLib != null || cachedExp != null) {
+            _uiState.update { st ->
+                val mergedGenres = when {
+                    cachedHome != null && cachedHome.genres.isNotEmpty() -> cachedHome.genres
+                    cachedExp != null && cachedExp.genres.isNotEmpty() -> cachedExp.genres
+                    else -> st.genres
+                }
+                val mergedHomeGenres = (mergedGenres.map { it.name } + com.example.data.SmartGenreCatalog.specs.map { it.title })
+                    .distinct()
+                    .take(15)
+                st.copy(
+                    homeQuickPicks = if (st.homeQuickPicks.isEmpty() && cachedHome != null) cachedHome.quickPicks else st.homeQuickPicks,
+                    homeListenAgain = if (st.homeListenAgain.isEmpty() && cachedHome != null) cachedHome.listenAgain else st.homeListenAgain,
+                    homeNewest = if (st.homeNewest.isEmpty() && cachedHome != null) cachedHome.newest else st.homeNewest,
+                    genres = mergedGenres,
+                    homeGenres = mergedHomeGenres,
+                    libraryPlaylists = when {
+                        st.libraryPlaylists.isEmpty() && cachedLib != null -> cachedLib.playlists
+                        st.libraryPlaylists.isEmpty() && cachedHome != null -> cachedHome.playlists
+                        else -> st.libraryPlaylists
+                    },
+                    libraryArtists = if (st.libraryArtists.isEmpty() && cachedLib != null) cachedLib.artists else st.libraryArtists,
+                    libraryAlbums = if (st.libraryAlbums.isEmpty() && cachedLib != null) cachedLib.albums else st.libraryAlbums,
+                    favoriteTracks = if (st.favoriteTracks.isEmpty() && cachedLib != null) cachedLib.favorites else st.favoriteTracks,
+                    serverSongCount = if (st.serverSongCount == 0L && cachedLib != null) cachedLib.serverSongCount else st.serverSongCount,
+                    exploreDefault = if (st.exploreDefault.tracks.isEmpty() && cachedExp != null) {
+                        SearchResult(cachedExp.artists, cachedExp.albums, cachedExp.tracks)
+                    } else st.exploreDefault,
+                    lastSyncTime = "Načítané z rýchlej pamäte • Obnovujem…"
+                )
+            }
         }
     }
 
@@ -248,10 +327,13 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         val lastPos = settings.loadLastPositionMs()
         val lastQueue = settings.loadLastQueue()
         val lastQueueIdx = settings.loadLastQueueIndex()
-        val hasSavedTrack = lastTrack != null && lastTrack.id.isNotBlank()
-        val restoredQueue = if (lastQueue.isNotEmpty()) lastQueue else if (hasSavedTrack) listOf(lastTrack!!) else emptyList()
-        val restoredTrack = if (hasSavedTrack) lastTrack!! else NoTrack
-        val restoredDur = if (hasSavedTrack) restoredTrack.durationSec * 1000L else 0L
+        val restoredTrack = lastTrack?.takeIf { it.id.isNotBlank() } ?: NoTrack
+        val restoredQueue = when {
+            lastQueue.isNotEmpty() -> lastQueue
+            restoredTrack !== NoTrack -> listOf(restoredTrack)
+            else -> emptyList()
+        }
+        val restoredDur = if (restoredTrack !== NoTrack) restoredTrack.durationSec * 1000L else 0L
         val restoredProgress = if (restoredDur > 0L) (lastPos.toFloat() / restoredDur).coerceIn(0f, 1f) else 0f
 
         val savedPreset = settings.getString(SettingsStore.KEY_EQ_PRESET, "Power Metal / Heavy Metal")
@@ -265,7 +347,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             isLoggedIn = creds != null,
             isServerConnectedSuccess = creds != null,
             serverInfoText = if (creds != null) "Pripájam sa…" else "",
-            cellularTranscodingEnabled = settings.getBoolean(SettingsStore.KEY_CELLULAR_TRANSCODING, true),
+            cellularTranscodingEnabled = settings.getBoolean(SettingsStore.KEY_CELLULAR_TRANSCODING, false),
             opusBitrateTarget = settings.getString(SettingsStore.KEY_OPUS_BITRATE, "320k"),
             backendCodec = settings.getString(SettingsStore.KEY_BACKEND_CODEC, "FLAC Stream"),
             loginTranscodeOption = settings.getString(
@@ -279,7 +361,10 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             subBassBoostDb = settings.getFloat(SettingsStore.KEY_SUB_BASS, 2.0f),
             crossfeedEnabled = settings.getBoolean(SettingsStore.KEY_SPATIAL, false),
             autoGainEnabled = settings.getBoolean(SettingsStore.KEY_AUTO_GAIN, true),
-            bluetoothVolumeStabilizerEnabled = settings.getBoolean(SettingsStore.KEY_BT_STABILIZER, true),
+            bluetoothVolumeStabilizerEnabled = settings.getBoolean(SettingsStore.KEY_BT_STABILIZER, false),
+            replayGainEnabled = settings.getBoolean(SettingsStore.KEY_REPLAY_GAIN_ENABLED, false),
+            replayGainMode = settings.getString(SettingsStore.KEY_REPLAY_GAIN_MODE, "Album Gain (Zachová dynamiku)"),
+            replayGainPreampDb = settings.getFloat(SettingsStore.KEY_REPLAY_GAIN_PREAMP, 0.0f),
             currentTrack = restoredTrack,
             queue = restoredQueue,
             queueIndex = if (restoredQueue.isNotEmpty()) lastQueueIdx.coerceIn(0, restoredQueue.lastIndex) else -1,
@@ -572,6 +657,9 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         settings.clearCredentials()
+        viewModelScope.launch(Dispatchers.IO) { catalogCache.clearAll() }
+        exploreLoaded = false
+        libraryLoaded = false
         api = null
         withController {
             it.stop()
@@ -588,8 +676,12 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     fun loadHome() {
         homeJob?.cancel()
         val genre = _uiState.value.homeFilter.takeIf { it != "Všetko" && it != "All" }
-        _uiState.update { it.copy(homeLoading = true, homeError = null) }
-        homeJob = launchApi(onError = { msg -> _uiState.update { it.copy(homeLoading = false, homeError = msg) } }) { a ->
+        _uiState.update { it.copy(homeLoading = it.homeQuickPicks.isEmpty(), homeError = null) }
+        homeJob = launchApi(onError = { msg ->
+            _uiState.update { st ->
+                st.copy(homeLoading = false, homeError = if (st.homeQuickPicks.isEmpty()) msg else null)
+            }
+        }) { a ->
             coroutineScope {
                 val picks = async { a.randomSongs(10, genre) }
                 val again = async {
@@ -604,6 +696,13 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val freshList = fresh.await()
                 val genresLoaded = genreList.await()
                 val plsLoaded = pls.await()
+                if (genre == null) {
+                    catalogCache.saveHome(
+                        a.baseUrl,
+                        a.username,
+                        CachedHomeSnapshot(pickList, againList, freshList, genresLoaded, plsLoaded.orEmpty())
+                    )
+                }
                 _uiState.update { st ->
                     val mergedGenres = if (genresLoaded.isNotEmpty()) genresLoaded else st.genres
                     val mergedHomeGenres = (mergedGenres.map { it.name } + com.example.data.SmartGenreCatalog.specs.map { it.title })
@@ -617,7 +716,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                         homeNewest = freshList,
                         genres = mergedGenres,
                         homeGenres = mergedHomeGenres,
-                        libraryPlaylists = plsLoaded ?: st.libraryPlaylists
+                        libraryPlaylists = plsLoaded ?: st.libraryPlaylists,
+                        lastSyncTime = "Synchronizované zo servera"
                     )
                 }
                 syncLikes(pickList)
@@ -628,10 +728,18 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     fun loadLibrary() {
         libraryJob?.cancel()
         libraryLoaded = true
-        _uiState.update { it.copy(libraryLoading = true, libraryError = null) }
+        _uiState.update {
+            it.copy(
+                libraryLoading = it.libraryPlaylists.isEmpty() && it.libraryAlbums.isEmpty() && it.libraryArtists.isEmpty(),
+                libraryError = null
+            )
+        }
         libraryJob = launchApi(onError = { msg ->
             libraryLoaded = false
-            _uiState.update { it.copy(libraryLoading = false, libraryError = msg) }
+            _uiState.update { st ->
+                val hasCached = st.libraryPlaylists.isNotEmpty() || st.libraryAlbums.isNotEmpty()
+                st.copy(libraryLoading = false, libraryError = if (hasCached) null else msg)
+            }
         }) { a ->
             coroutineScope {
                 val pls = async { a.playlists() }
@@ -646,6 +754,18 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val firstAlbumsLoaded = firstAlbums.await()
                 val scanStatus = scan.await()
 
+                catalogCache.saveLibrary(
+                    a.baseUrl,
+                    a.username,
+                    CachedLibrarySnapshot(
+                        plsLoaded,
+                        artistsLoaded,
+                        firstAlbumsLoaded,
+                        favLoaded,
+                        scanStatus.count
+                    )
+                )
+
                 _uiState.update {
                     it.copy(
                         libraryLoading = false,
@@ -654,7 +774,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                         libraryArtists = artistsLoaded,
                         libraryAlbums = firstAlbumsLoaded,
                         favoriteTracks = favLoaded,
-                        serverSongCount = if (scanStatus.count > 0L) scanStatus.count else it.serverSongCount
+                        serverSongCount = if (scanStatus.count > 0L) scanStatus.count else it.serverSongCount,
+                        lastSyncTime = "Synchronizované zo servera"
                     )
                 }
                 syncLikes(favLoaded)
@@ -667,7 +788,9 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         exploreLoaded = true
         exploreJob = launchApi(onError = { msg ->
             exploreLoaded = false
-            _uiState.update { it.copy(exploreError = msg) }
+            _uiState.update { st ->
+                st.copy(exploreError = if (st.exploreDefault.tracks.isEmpty()) msg else null)
+            }
         }) { a ->
             coroutineScope {
                 val tracks = async { a.randomSongs(20) }
@@ -678,10 +801,16 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 val al = albums.await()
                 val ar = artists.await()
                 val ge = genreList.await()
+                val artistSlice = ar.shuffled().take(12)
+                catalogCache.saveExplore(
+                    a.baseUrl,
+                    a.username,
+                    CachedExploreSnapshot(artistSlice, al, t, ge)
+                )
                 _uiState.update { st ->
                     st.copy(
                         exploreError = null,
-                        exploreDefault = SearchResult(ar.shuffled().take(12), al, t),
+                        exploreDefault = SearchResult(artistSlice, al, t),
                         genres = if (ge.isNotEmpty()) ge else st.genres
                     )
                 }
@@ -813,16 +942,23 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                     syncFromController(c)
                 } else {
                     // Controller is empty (e.g. freshly started after phone/TV restart).
-                    // Restore saved queue into ExoPlayer WITHOUT calling c.prepare() on startup so
-                    // ExoPlayer does not immediately download a huge FLAC file while Home is loading!
+                    // Slice around queueIndex and suppress transition side-effects so we preserve exact saved position!
                     val state = _uiState.value
                     if (state.currentTrack.id.isNotBlank() && state.queue.isNotEmpty()) {
                         val profile = currentStreamProfile()
-                        val safeQueue = state.queue.take(60)
+                        val fullQueue = state.queue
+                        val windowStart = (state.queueIndex - 10).coerceAtLeast(0).coerceAtMost((fullQueue.size - 1).coerceAtLeast(0))
+                        val safeQueue = if (fullQueue.size > 60) fullQueue.drop(windowStart).take(60) else fullQueue
+                        val localIdx = if (fullQueue.size > 60) {
+                            (state.queueIndex - windowStart).coerceIn(0, (safeQueue.size - 1).coerceAtLeast(0))
+                        } else {
+                            state.queueIndex.coerceIn(0, (safeQueue.size - 1).coerceAtLeast(0))
+                        }
                         val items = safeQueue.map { mediaItemFor(api, it, profile) }
-                        val idx = state.queueIndex.coerceIn(0, items.lastIndex)
                         val pos = state.positionMs
-                        c.setMediaItems(items, idx, pos)
+                        suppressInitialRestoreTransition = true
+                        _uiState.update { it.copy(queue = safeQueue, queueIndex = localIdx, currentTrack = safeQueue[localIdx]) }
+                        c.setMediaItems(items, localIdx, pos)
                         c.pause()
                     }
                 }
@@ -876,14 +1012,17 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            onCurrentItemChanged()
-            if (_uiState.value.sleepTimerOption == SleepTimerOption.END_OF_TRACK &&
-                reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
-            ) {
-                withController { it.pause() }
-                _uiState.update { it.copy(sleepTimerOption = SleepTimerOption.OFF, sleepTimerRemainingSec = 0) }
-                showMessage("Časovač spánku: Prehrávanie bolo pozastavené po skončení skladby.")
+            if (suppressInitialRestoreTransition) {
+                suppressInitialRestoreTransition = false
+                mediaItem?.let { item ->
+                    loadLyrics(_uiState.value.currentTrack)
+                    if (item.mediaId.isNotBlank() && _uiState.value.nowPlayingTab in setOf("PODOBNÉ", "RELATED")) {
+                        loadRelated(_uiState.value.currentTrack)
+                    }
+                }
+                return
             }
+            onCurrentItemChanged()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -902,7 +1041,15 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            showMessage("Chyba prehrávania (${error.errorCodeName}). Skontroluj spojenie so serverom.")
+            val isNetworkErr = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT ||
+                error.errorCodeName.contains("NETWORK", ignoreCase = true)
+            if (isNetworkErr) {
+                showMessage("Výpadok siete – automaticky obnovujem pripojenie…")
+            } else {
+                showMessage("Chyba prehrávania (${error.errorCodeName}). Skontroluj spojenie so serverom.")
+            }
         }
     }
 
@@ -1071,7 +1218,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
         // 2. If user is on "FLAC Stream" (Originál bez kompresie), check if Mobile Data Saver should kick in on cellular
         if (isOnCellular() && s.cellularTranscodingEnabled) {
-            val mobileRate = minOf(rate, 192)
+            val mobileRate = minOf(rate, 320)
             return StreamProfile("mp3", mobileRate, "Úspora mobilných dát • MP3 $mobileRate kbps")
         }
 
@@ -1135,6 +1282,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             putString("suffix", t.suffix)
             putInt("durationSec", t.durationSec)
             putBoolean("hiRes", profile.format == "raw" && t.isHiResBadgeCyan)
+            if (t.replayGainTrackDb != null) putFloat("rgTrack", t.replayGainTrackDb)
+            if (t.replayGainAlbumDb != null) putFloat("rgAlbum", t.replayGainAlbumDb)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(t.title)
@@ -1179,7 +1328,9 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             durationSec = durationSec,
             suffix = ex?.getString("suffix").orEmpty(),
             coverArtId = ex?.getString("coverArtId").orEmpty(),
-            techLine = ex?.getString("techLine").orEmpty()
+            techLine = ex?.getString("techLine").orEmpty(),
+            replayGainTrackDb = if (ex != null && ex.containsKey("rgTrack")) ex.getFloat("rgTrack") else null,
+            replayGainAlbumDb = if (ex != null && ex.containsKey("rgAlbum")) ex.getFloat("rgAlbum") else null
         )
     }
 
@@ -1562,9 +1713,9 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         AudioEffectsManager.setBluetoothVolumeStabilizerEnabled(enabled)
         showMessage(
             if (enabled) {
-                "Stabilizácia hlasitosti (Auto / Bluetooth) zapnutá – zakázané kolísanie a stlmovanie zvuku."
+                "Núdzový BT bypass zapnutý – EQ je obídený a hlasitosť zamknutá na 100 %."
             } else {
-                "Stabilizácia hlasitosti (Auto / Bluetooth) vypnutá."
+                "Núdzový BT bypass vypnutý – ekvalizér a basy sú aktívne aj cez Bluetooth."
             }
         )
     }
@@ -1615,13 +1766,17 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             (Math.round(v * 2f) / 2f).coerceIn(-12f, 12f)
         }
         val finalPreamp = if (state.autoPreampEnabled) preampVal else state.preampDb
+        val presetTitle = "AutoEQ: ${profile.name}"
+        settings.saveEqBands(calibratedBands)
+        settings.putFloat(SettingsStore.KEY_EQ_PREAMP, finalPreamp)
+        settings.putString(SettingsStore.KEY_EQ_PRESET, presetTitle)
         _uiState.update {
             it.copy(
                 selectedHeadphone = profile,
                 autoEqTargetCurve = targetCurve,
                 eqBands = calibratedBands,
                 preampDb = finalPreamp,
-                activePresetName = "AutoEQ: ${profile.name}"
+                activePresetName = presetTitle
             )
         }
         AudioEffectsManager.setBands(calibratedBands, finalPreamp)
@@ -1649,11 +1804,15 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             (Math.round(v * 2f) / 2f).coerceIn(-12f, 12f)
         }
         val finalPreamp = if (state.autoPreampEnabled) preampVal else state.preampDb
+        val presetTitle = "AutoEQ: ${profile.name}"
+        settings.saveEqBands(calibratedBands)
+        settings.putFloat(SettingsStore.KEY_EQ_PREAMP, finalPreamp)
+        settings.putString(SettingsStore.KEY_EQ_PRESET, presetTitle)
         _uiState.update {
             it.copy(
                 eqBands = calibratedBands,
                 preampDb = finalPreamp,
-                activePresetName = "AutoEQ: ${profile.name}",
+                activePresetName = presetTitle,
                 showAutoEqModal = false
             )
         }
@@ -1662,7 +1821,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Sleep Timer
+    // Sleep Timer (Service-owned so it survives Activity closing)
     // ---------------------------------------------------------------------------------------------
 
     fun setShowSleepTimerModal(show: Boolean) {
@@ -1670,37 +1829,12 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setSleepTimer(option: SleepTimerOption) {
-        sleepTimerJob?.cancel()
-        _uiState.update { it.copy(sleepTimerOption = option, showSleepTimerModal = false) }
-
-        if (option == SleepTimerOption.OFF) {
-            _uiState.update { it.copy(sleepTimerRemainingSec = 0) }
-            showMessage("Časovač spánku bol vypnutý.")
-            return
-        }
-
-        if (option == SleepTimerOption.END_OF_TRACK) {
-            _uiState.update { it.copy(sleepTimerRemainingSec = -1) }
-            showMessage("Časovač spánku: Prehrávanie sa zastaví na konci tejto skladby.")
-            return
-        }
-
-        val totalSec = option.minutes * 60
-        _uiState.update { it.copy(sleepTimerRemainingSec = totalSec) }
-        showMessage("Časovač spánku nastavený na ${option.label}.")
-
-        sleepTimerJob = viewModelScope.launch {
-            var rem = totalSec
-            while (rem > 0 && isActive) {
-                delay(1000)
-                rem--
-                _uiState.update { it.copy(sleepTimerRemainingSec = rem) }
-            }
-            if (rem <= 0) {
-                withController { it.pause() }
-                _uiState.update { it.copy(sleepTimerOption = SleepTimerOption.OFF, sleepTimerRemainingSec = 0) }
-                showMessage("Časovač spánku: Čas vypršal, prehrávanie bolo pozastavené.")
-            }
+        _uiState.update { it.copy(showSleepTimerModal = false) }
+        SleepTimerCoordinator.setTimer(option)
+        when (option) {
+            SleepTimerOption.OFF -> showMessage("Časovač spánku bol vypnutý.")
+            SleepTimerOption.END_OF_TRACK -> showMessage("Časovač spánku: Prehrávanie sa zastaví na konci tejto skladby.")
+            else -> showMessage("Časovač spánku nastavený na ${option.label}.")
         }
     }
 
@@ -1901,19 +2035,23 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleReplayGain() {
         val next = !_uiState.value.replayGainEnabled
+        settings.putBoolean(SettingsStore.KEY_REPLAY_GAIN_ENABLED, next)
         _uiState.update { it.copy(replayGainEnabled = next) }
-        AudioEffectsManager.setReplayGain(next, _uiState.value.replayGainPreampDb)
+        AudioEffectsManager.setReplayGain(next, _uiState.value.replayGainPreampDb, _uiState.value.replayGainMode)
         showMessage(if (next) "Vyrovnávanie hlasitosti (ReplayGain) zapnuté." else "Vyrovnávanie hlasitosti vypnuté.")
     }
 
     fun setReplayGainMode(mode: String) {
+        settings.putString(SettingsStore.KEY_REPLAY_GAIN_MODE, mode)
         _uiState.update { it.copy(replayGainMode = mode) }
+        AudioEffectsManager.setReplayGain(_uiState.value.replayGainEnabled, _uiState.value.replayGainPreampDb, mode)
     }
 
     fun setReplayGainPreamp(db: Float) {
         val rounded = (Math.round(db * 2f) / 2f).coerceIn(-6f, 6f)
+        settings.putFloat(SettingsStore.KEY_REPLAY_GAIN_PREAMP, rounded)
         _uiState.update { it.copy(replayGainPreampDb = rounded) }
-        AudioEffectsManager.setReplayGain(_uiState.value.replayGainEnabled, rounded)
+        AudioEffectsManager.setReplayGain(_uiState.value.replayGainEnabled, rounded, _uiState.value.replayGainMode)
     }
 
     fun toggleGapless() {
@@ -1933,14 +2071,14 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     private fun refreshCacheSize() {
         viewModelScope.launch {
             val size = withContext(Dispatchers.IO) { dirSize(getApplication<Application>().cacheDir) }
-            _uiState.update { it.copy(cacheSizeText = "Vyrovnávacia pamäť (obaly albumov) zaberá ${formatMb(size)}") }
+            _uiState.update { it.copy(cacheSizeText = "Vyrovnávacia pamäť (obaly + audio cache) zaberá ${formatMb(size)}") }
         }
     }
 
     fun clearStreamCache() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                getApplication<Application>().cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                MediaCacheManager.clearAllCaches(getApplication())
             }
             refreshCacheSize()
             showMessage("Vyrovnávacia pamäť bola vymazaná.")

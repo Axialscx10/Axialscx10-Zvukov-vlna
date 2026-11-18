@@ -36,7 +36,9 @@ data class TrackItem(
     val samplingRate: Int = 0,
     val year: Int = 0,
     val coverArtId: String = "",
-    val techLine: String = ""
+    val techLine: String = "",
+    val replayGainTrackDb: Float? = null,
+    val replayGainAlbumDb: Float? = null
 )
 
 /** Placeholder used when nothing is playing yet. */
@@ -59,7 +61,8 @@ data class AlbumItem(
     val badge: String,
     val imageUrl: String,
     val isDownloaded: Boolean = false,
-    val isOutlineBadge: Boolean = false
+    val isOutlineBadge: Boolean = false,
+    val coverArtId: String = ""
 )
 
 @Immutable
@@ -67,7 +70,8 @@ data class ArtistItem(
     val id: String,
     val name: String,
     val trackCount: String,
-    val imageUrl: String
+    val imageUrl: String,
+    val coverArtId: String = ""
 )
 
 /**
@@ -88,7 +92,8 @@ data class PlaylistItem(
     val isPinned: Boolean = false,
     val isOffline: Boolean = false,
     val isStarred: Boolean = false,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val coverArtId: String = ""
 )
 
 @Immutable

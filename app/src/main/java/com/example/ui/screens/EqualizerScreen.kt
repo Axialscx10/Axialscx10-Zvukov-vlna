@@ -187,9 +187,14 @@ fun EqualizerScreen(
                                 .background(SurfaceContainerHigh)
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
+                            val eqStatusLabel = when {
+                                !uiState.eqMasterEnabled -> "VYPNUTÉ"
+                                uiState.bluetoothVolumeStabilizerEnabled -> "BYPASS (BT Oprava)"
+                                else -> "AKTÍVNE"
+                            }
                             Text(
-                                text = if (uiState.eqMasterEnabled) "ZAPNUTÉ" else "VYPNUTÉ",
-                                color = Secondary,
+                                text = eqStatusLabel,
+                                color = if (uiState.eqMasterEnabled && !uiState.bluetoothVolumeStabilizerEnabled) Secondary else OnSurfaceVariant,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.6.sp
@@ -688,12 +693,12 @@ fun EqualizerScreen(
                         }
                     }
 
-                    // Car & Bluetooth Volume Stabilizer Toggle
+                    // Car & Bluetooth Volume Stabilizer Toggle (Emergency DSP Bypass)
                     EnhancementToggleCard(
                         icon = Icons.Default.GraphicEq,
                         iconTint = Secondary,
-                        title = "Stabilizácia hlasitosti v aute / Bluetooth (Proti skákaniu zvuku)",
-                        subtitle = "Zabráni samovoľnému kolísaniu hlasitosti, skokom po pauze a stlmovaniu hudby pri tichých notifikáciách v aute",
+                        title = "Núdzový BT bypass (Stabilizácia hlasitosti v aute)",
+                        subtitle = "Zapni len ak autorádio skáče v hlasitosti: obíde hardvérový ekvalizér a zamkne hlasitosť na 100 %",
                         checked = uiState.bluetoothVolumeStabilizerEnabled,
                         onCheckedChange = onToggleBluetoothStabilizer
                     )

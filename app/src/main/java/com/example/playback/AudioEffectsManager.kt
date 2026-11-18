@@ -6,27 +6,29 @@ import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
 import androidx.media3.common.C
 import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Manages the Android hardware Equalizer, BassBoost, Virtualizer (3D Spatial),
  * and LoudnessEnhancer attached to ExoPlayer's audio session ID.
  *
- * CRITICAL CAR BLUETOOTH FIX (v31.0):
- * On Android (Samsung SoundAlive, Xiaomi MiSound, Pixel/Motorola/OnePlus `libbundlewrapper.so`),
- * attaching ANY hardware `AudioEffect` (including `Equalizer`) to an `audioSessionId` routes the
- * `AudioTrack` through the OS `EffectChain` mixer instead of the direct A2DP `FastMixer`.
- * When Bluetooth A2DP resumes from Pause (`AVDTP_START`), `libbundlewrapper.so` engages its internal
- * biquad limiter / headroom attenuation (-6 dB to -9 dB) on the first Play until the user pauses and
- * plays a second time.
- *
- * Therefore, whenever `bluetoothVolumeStabilizerEnabled` is ON (default) OR a Bluetooth audio output
- * is active, ALL hardware `AudioEffect` instances (`Equalizer`, `BassBoost`, `Virtualizer`,
- * `LoudnessEnhancer`) are completely detached and released from `audioSessionId`, guaranteeing a 100%
- * pure, un-attenuated native PCM stream at full 1.0f volume on the very first resume after Pause.
+ * Design notes:
+ * - Hardware EQ, BassBoost, and Spatial stay active on speakers, wired headphones, AND Bluetooth/Car
+ *   outputs unless the user explicitly turns on the Emergency Bluetooth Bypass switch.
+ * - Preamp / Auto-Gain headroom / ReplayGain negative gain is applied ONCE digitally via
+ *   `player.volume` (0.20f..1.0f), while positive gain uses `LoudnessEnhancer`, preventing double
+ *   attenuation across the EQ and player volume.
+ * - All 10 UI bands (31 Hz..16 kHz) are averaged/interpolated in log-frequency space onto however
+ *   many physical bands the device DSP provides (typically 5).
  */
 object AudioEffectsManager {
+    private val UI_TARGET_FREQS_HZ = floatArrayOf(
+        31f, 62f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f
+    )
+
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var virtualizer: Virtualizer? = null
@@ -39,10 +41,15 @@ object AudioEffectsManager {
     private var subBassBoostDb: Float = 2.0f
     private var spatialEnabled: Boolean = false
     private var autoGainEnabled: Boolean = true
+
     private var replayGainEnabled: Boolean = false
+    private var replayGainMode: String = "Album Gain (Zachová dynamiku)"
     private var replayGainPreampDb: Float = 0f
-    private var bluetoothVolumeStabilizerEnabled: Boolean = true
-    private var bluetoothOutputConnected: Boolean = false
+    private var activeTrackRgDb: Float? = null
+    private var activeAlbumRgDb: Float? = null
+
+    // Emergency Car/BT DSP bypass is OFF by default so EQ & Bass work over Bluetooth normally.
+    private var bluetoothVolumeStabilizerEnabled: Boolean = false
 
     private var playerVolumeListener: ((Float) -> Unit)? = null
 
@@ -56,23 +63,15 @@ object AudioEffectsManager {
     fun isBluetoothVolumeStabilizerEnabled(): Boolean = bluetoothVolumeStabilizerEnabled
 
     /**
-     * Returns true when hardware DSP effects must be bypassed to prevent Bluetooth A2DP
-     * pause/resume volume drops in cars.
+     * Returns true ONLY when the user explicitly enabled the emergency hardware-DSP bypass
+     * (and when stabilizing volume, also avoids audio focus ducking).
      */
     @Synchronized
-    fun shouldBypassHardwareDsp(): Boolean =
-        bluetoothVolumeStabilizerEnabled || bluetoothOutputConnected
-
-    @Synchronized
-    fun setBluetoothOutputConnected(connected: Boolean) {
-        if (bluetoothOutputConnected == connected) return
-        bluetoothOutputConnected = connected
-        syncDspAttachment()
-        notifyPlayerVolume()
-    }
+    fun shouldBypassHardwareDsp(): Boolean = bluetoothVolumeStabilizerEnabled
 
     @Synchronized
     fun setBluetoothVolumeStabilizerEnabled(enabled: Boolean) {
+        if (bluetoothVolumeStabilizerEnabled == enabled) return
         bluetoothVolumeStabilizerEnabled = enabled
         syncDspAttachment()
         notifyPlayerVolume()
@@ -81,8 +80,6 @@ object AudioEffectsManager {
     @Synchronized
     private fun syncDspAttachment() {
         if (shouldBypassHardwareDsp() || !masterEnabled) {
-            // Completely release ALL AudioEffects (including Equalizer) so AudioFlinger routes
-            // the stream directly through FastMixer with zero libbundlewrapper.so attenuation!
             releaseEffects()
         } else if (currentAudioSessionId != C.AUDIO_SESSION_ID_UNSET && currentAudioSessionId != 0) {
             ensureAllEffects(currentAudioSessionId)
@@ -95,15 +92,19 @@ object AudioEffectsManager {
 
     /**
      * Computes digital volume for ExoPlayer (0.20f .. 1.0f).
-     * When Bluetooth Volume Stabilizer is ON or Bluetooth output is connected, digital volume
-     * is ALWAYS locked to 1.0f (100%).
+     * Negative preamp / auto-gain headroom / ReplayGain attenuation is applied here ONCE.
      */
     @Synchronized
     fun computePlayerVolume(): Float {
-        if (!masterEnabled || shouldBypassHardwareDsp()) return 1.0f
-        val totalPreampDb = effectivePreampOffsetDb().coerceIn(-12f, 0f)
-        if (totalPreampDb >= -0.1f) return 1.0f
-        return 10.0f.pow(totalPreampDb / 20.0f).coerceIn(0.20f, 1.0f)
+        if (shouldBypassHardwareDsp()) return 1.0f
+        if (!masterEnabled && !replayGainEnabled) return 1.0f
+        val offsetDb = if (masterEnabled) {
+            effectivePreampOffsetDb()
+        } else {
+            effectiveReplayGainDb()
+        }.coerceIn(-12f, 0f)
+        if (offsetDb >= -0.05f) return 1.0f
+        return 10.0f.pow(offsetDb / 20.0f).coerceIn(0.20f, 1.0f)
     }
 
     private fun notifyPlayerVolume() {
@@ -141,6 +142,9 @@ object AudioEffectsManager {
             notifyPlayerVolume()
             return
         }
+        if (equalizer == null && currentAudioSessionId != C.AUDIO_SESSION_ID_UNSET && currentAudioSessionId != 0) {
+            ensureAllEffects(currentAudioSessionId)
+        }
         applyEqualizerSettings()
         applyBassBoostSettings()
         applyVirtualizerSettings()
@@ -170,6 +174,7 @@ object AudioEffectsManager {
         }
         if (virtualizer == null) {
             try {
+                @Suppress("DEPRECATION")
                 virtualizer = Virtualizer(0, audioSessionId).apply {
                     enabled = masterEnabled && spatialEnabled
                 }
@@ -233,25 +238,117 @@ object AudioEffectsManager {
     }
 
     @Synchronized
-    fun setReplayGain(enabled: Boolean, rgPreampDb: Float) {
+    fun setReplayGain(enabled: Boolean, rgPreampDb: Float, mode: String = replayGainMode) {
         replayGainEnabled = enabled
         replayGainPreampDb = rgPreampDb
+        replayGainMode = mode
         if (!shouldBypassHardwareDsp() && masterEnabled) {
-            applyEqualizerSettings()
             applyLoudnessSettings()
         }
         notifyPlayerVolume()
     }
 
-    private fun effectivePreampOffsetDb(): Float {
+    @Synchronized
+    fun setActiveTrackReplayGain(trackDb: Float?, albumDb: Float?) {
+        activeTrackRgDb = trackDb
+        activeAlbumRgDb = albumDb
+        if (replayGainEnabled) {
+            if (!shouldBypassHardwareDsp() && masterEnabled) {
+                applyLoudnessSettings()
+            }
+            notifyPlayerVolume()
+        }
+    }
+
+    private fun effectiveReplayGainDb(): Float {
+        if (!replayGainEnabled) return 0f
+        val isTrackMode = replayGainMode.contains("Track", ignoreCase = true) ||
+            replayGainMode.contains("Skladba", ignoreCase = true)
+        val tagGain = if (isTrackMode) {
+            activeTrackRgDb ?: activeAlbumRgDb ?: 0f
+        } else {
+            activeAlbumRgDb ?: activeTrackRgDb ?: 0f
+        }
+        return (tagGain + replayGainPreampDb).coerceIn(-12f, 6f)
+    }
+
+    internal fun effectivePreampOffsetDb(): Float {
         val maxBoost = (bandLevels.maxOrNull() ?: 0f).coerceAtLeast(0f)
         val autoGainReduction = if (autoGainEnabled && maxBoost > 3.5f) {
             -((maxBoost - 3.5f) * 0.55f)
         } else {
             0f
         }
-        val rgOffset = if (replayGainEnabled) replayGainPreampDb else 0f
-        return preampDb + autoGainReduction + rgOffset
+        return preampDb + autoGainReduction + effectiveReplayGainDb()
+    }
+
+    /**
+     * Maps the 10 UI bands (31..16000 Hz) onto [hwCenterFreqsHz] using log-frequency Voronoi
+     * buckets (or linear log2 interpolation if hardware has more bands) so every UI slider affects output.
+     */
+    internal fun mapUiBandsToHwBands(
+        uiBands: List<Float>,
+        hwCenterFreqsHz: FloatArray,
+        subBassDb: Float,
+        spatial: Boolean
+    ): FloatArray {
+        val numHw = hwCenterFreqsHz.size
+        val result = FloatArray(numHw)
+        if (numHw == 0) return result
+
+        val effectiveUi = FloatArray(UI_TARGET_FREQS_HZ.size) { idx ->
+            val subExtra = if (idx <= 1 && subBassDb > 0.1f) {
+                subBassDb * (if (idx == 0) 0.35f else 0.18f)
+            } else 0f
+            val spatialExtra = if (spatial && idx >= 8) 0.8f else 0f
+            uiBands.getOrElse(idx) { 0f } + subExtra + spatialExtra
+        }
+
+        if (numHw == 1) {
+            result[0] = effectiveUi.average().toFloat()
+            return result
+        }
+
+        for (i in 0 until numHw) {
+            val lowBound = if (i == 0) 0f else sqrt(hwCenterFreqsHz[i - 1] * hwCenterFreqsHz[i])
+            val highBound = if (i == numHw - 1) Float.MAX_VALUE else sqrt(hwCenterFreqsHz[i] * hwCenterFreqsHz[i + 1])
+
+            var sum = 0f
+            var count = 0
+            for (uIdx in UI_TARGET_FREQS_HZ.indices) {
+                val f = UI_TARGET_FREQS_HZ[uIdx]
+                val inBucket = if (i == numHw - 1) f >= lowBound else (f >= lowBound && f < highBound)
+                if (inBucket) {
+                    sum += effectiveUi[uIdx]
+                    count++
+                }
+            }
+            result[i] = if (count > 0) {
+                sum / count
+            } else {
+                // Linear interpolation in log2-frequency space
+                interpolateLog2(hwCenterFreqsHz[i], effectiveUi)
+            }
+        }
+        return result
+    }
+
+    private fun interpolateLog2(freqHz: Float, uiValues: FloatArray): Float {
+        val safeF = freqHz.coerceAtLeast(1f)
+        if (safeF <= UI_TARGET_FREQS_HZ.first()) return uiValues.first()
+        if (safeF >= UI_TARGET_FREQS_HZ.last()) return uiValues.last()
+        val logF = ln(safeF.toDouble())
+        for (k in 0 until UI_TARGET_FREQS_HZ.size - 1) {
+            val f0 = UI_TARGET_FREQS_HZ[k]
+            val f1 = UI_TARGET_FREQS_HZ[k + 1]
+            if (safeF in f0..f1) {
+                val l0 = ln(f0.toDouble())
+                val l1 = ln(f1.toDouble())
+                val frac = ((logF - l0) / (l1 - l0)).toFloat().coerceIn(0f, 1f)
+                return uiValues[k] * (1f - frac) + uiValues[k + 1] * frac
+            }
+        }
+        return uiValues.last()
     }
 
     private fun applyEqualizerSettings() {
@@ -260,37 +357,18 @@ object AudioEffectsManager {
         try {
             eq.enabled = masterEnabled
             val numBands = eq.numberOfBands.toInt()
+            if (numBands <= 0) return
             val range = eq.bandLevelRange
             val minMb = range[0].toInt()
             val maxMb = range[1].toInt()
 
-            val targetFreqs = listOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-
-            val rawHwDb = FloatArray(numBands)
-            for (i in 0 until numBands) {
-                val hwCenterFreqHz = eq.getCenterFreq(i.toShort()) / 1000
-                var closestIdx = 0
-                var minDiff = Int.MAX_VALUE
-                for ((idx, f) in targetFreqs.withIndex()) {
-                    val diff = abs(f - hwCenterFreqHz)
-                    if (diff < minDiff) {
-                        minDiff = diff
-                        closestIdx = idx
-                    }
-                }
-                val subExtra = if (closestIdx <= 1 && subBassBoostDb > 0.1f) {
-                    subBassBoostDb * (if (closestIdx == 0) 0.35f else 0.18f)
-                } else 0f
-                val spatialExtra = if (spatialEnabled && closestIdx >= 8) 0.8f else 0f
-                val db = bandLevels.getOrElse(closestIdx) { 0f } + subExtra + spatialExtra
-                rawHwDb[i] = db
+            val hwFreqs = FloatArray(numBands) { i ->
+                (eq.getCenterFreq(i.toShort()) / 1000f).coerceAtLeast(20f)
             }
-
-            val headroomOffsetDb = effectivePreampOffsetDb().coerceAtMost(0f)
+            val mappedDb = mapUiBandsToHwBands(bandLevels, hwFreqs, subBassBoostDb, spatialEnabled)
 
             for (i in 0 until numBands) {
-                val dbVal = rawHwDb[i] + headroomOffsetDb
-                val millibels = (dbVal * 100f).roundToInt().coerceIn(minMb, maxMb).toShort()
+                val millibels = (mappedDb[i] * 100f).roundToInt().coerceIn(minMb, maxMb).toShort()
                 eq.setBandLevel(i.toShort(), millibels)
             }
         } catch (_: Throwable) {}
@@ -315,6 +393,7 @@ object AudioEffectsManager {
         try {
             val useHwVirt = masterEnabled && spatialEnabled
             virt.enabled = useHwVirt
+            @Suppress("DEPRECATION")
             if (useHwVirt && virt.strengthSupported) {
                 virt.setStrength(650.toShort())
             }
@@ -362,5 +441,25 @@ object AudioEffectsManager {
             loudnessEnhancer?.release()
         } catch (_: Throwable) {}
         loudnessEnhancer = null
+    }
+
+    /** Test helper to reset mutable state between unit tests. */
+    @Synchronized
+    internal fun resetForTest() {
+        releaseEffects()
+        currentAudioSessionId = C.AUDIO_SESSION_ID_UNSET
+        masterEnabled = true
+        bandLevels = List(10) { 0f }
+        preampDb = 0f
+        subBassBoostDb = 0f
+        spatialEnabled = false
+        autoGainEnabled = false
+        replayGainEnabled = false
+        replayGainMode = "Album Gain (Zachová dynamiku)"
+        replayGainPreampDb = 0f
+        activeTrackRgDb = null
+        activeAlbumRgDb = null
+        bluetoothVolumeStabilizerEnabled = false
+        playerVolumeListener = null
     }
 }
