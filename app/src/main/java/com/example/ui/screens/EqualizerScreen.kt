@@ -125,7 +125,8 @@ fun EqualizerScreen(
     onCalibrationDryWetChange: (Float) -> Unit,
     onToggleAutoPreamp: (Boolean) -> Unit,
     onToggleSubBassCompensation: (Boolean) -> Unit,
-    onApplyAutoEqToDsp: () -> Unit
+    onApplyAutoEqToDsp: () -> Unit,
+    onToggleBluetoothStabilizer: (Boolean) -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -138,7 +139,7 @@ fun EqualizerScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 140.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Master DSP Procesor Card
+            // 1. Hlavný zvukový procesor & Celková hlasitosť (Pre-amp)
             item {
                 Column(
                     modifier = Modifier
@@ -155,7 +156,8 @@ fun EqualizerScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
                             Box(
                                 modifier = Modifier
@@ -166,13 +168,13 @@ fun EqualizerScreen(
                             )
                             Column {
                                 Text(
-                                    text = "Master DSP Procesor",
+                                    text = "Úprava zvuku a hlasitosti",
                                     color = OnSurface,
                                     fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Priame hardvérové spracovanie zvuku",
+                                    text = "Zapína/vypína sa prepínačom celkom hore napravo",
                                     color = OnSurfaceVariant,
                                     fontSize = 12.sp
                                 )
@@ -183,10 +185,10 @@ fun EqualizerScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(SurfaceContainerHigh)
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = if (uiState.eqMasterEnabled) "AKTÍVNY" else "BYPASS",
+                                text = if (uiState.eqMasterEnabled) "ZAPNUTÉ" else "VYPNUTÉ",
                                 color = Secondary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
@@ -195,63 +197,14 @@ fun EqualizerScreen(
                         }
                     }
 
-                    // Tech Badges
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(SurfaceContainerHigh)
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Memory,
-                                contentDescription = null,
-                                tint = Secondary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "32-bit Float Processing",
-                                color = OnSurface,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(SurfaceContainerHigh)
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Verified,
-                                contentDescription = null,
-                                tint = Primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Bit-perfect DAC Bypass",
-                                color = OnSurface,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Master Pre-amp
+                    // Master Pre-amp with plain Slovak explanation
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(SurfaceContainer)
-                            .padding(12.dp)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -269,10 +222,10 @@ fun EqualizerScreen(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
-                                    text = "Hlavný predzosilňovač (Pre-amp)",
+                                    text = "Celkové zosilnenie hlasitosti (Pre-amp)",
                                     color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                             val preampFormatted = String.format(
@@ -284,10 +237,17 @@ fun EqualizerScreen(
                             Text(
                                 text = preampFormatted,
                                 color = Primary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
+
+                        Text(
+                            text = "Posuň doprava (+dB) pre zosilnenie tichých skladieb. Ak pri silných basoch počuješ chrčanie reproduktora, posuň mierne doľava (-dB).",
+                            color = OnSurfaceVariant,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
 
                         Slider(
                             value = uiState.preampDb,
@@ -305,9 +265,9 @@ fun EqualizerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("-12 dB", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("0 dB (Referencia)", color = OnSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("+12 dB", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("-12 dB (Stlmiť proti chrčaniu)", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("0 dB (Normál)", color = Primary, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("+12 dB (Zosilniť)", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -431,12 +391,13 @@ fun EqualizerScreen(
                                 text = "10-Pásmový Ekvalizér",
                                 color = OnSurface,
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Presné analógové tvarovanie spektra",
+                                text = "Vľavo (31–125 Hz) = Basy • Stred (250–4k) = Gitary a spev • Vpravo (8k–16k) = Výšky a činely",
                                 color = OnSurfaceVariant,
-                                fontSize = 12.sp
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
                             )
                         }
 
@@ -458,7 +419,7 @@ fun EqualizerScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "Plochá (Flat)",
+                                    text = "Vynulovať (0 dB)",
                                     color = OnSurface,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
@@ -482,7 +443,7 @@ fun EqualizerScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "Invertovať",
+                                    text = "Otočiť",
                                     color = OnSurface,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
@@ -625,7 +586,7 @@ fun EqualizerScreen(
                 }
             }
 
-            // 5. Pokročilé vylepšenia prednesu
+            // 5. Vylepšenia zvuku (Basy, Priestorový zvuk, Ochrana pred chrčaním, Slúchadlá)
             item {
                 Column(
                     modifier = Modifier
@@ -646,12 +607,116 @@ fun EqualizerScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Pokročilé vylepšenia prednesu",
+                            text = "Ďalšie nastavenia zvuku (Vysvetlené jednoducho)",
                             color = OnSurface,
                             fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
+
+                    // Sub-bass Zosilňovač (Bass Boost)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceContainer)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Speaker,
+                                    contentDescription = null,
+                                    tint = Primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Zvýraznenie hlbokých basov (Bass Boost)",
+                                    color = OnSurface,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(SurfaceContainerHighest)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = String.format(Locale.US, "+%.1f dB", uiState.subBassBoostDb),
+                                    color = Secondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Pridá údernosť kopáku a basgitare bez toho, aby zahuhlal spev.",
+                            color = OnSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+
+                        Slider(
+                            value = uiState.subBassBoostDb,
+                            onValueChange = onSubBassBoostChange,
+                            valueRange = 0f..10f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Primary,
+                                activeTrackColor = Primary,
+                                inactiveTrackColor = SurfaceContainerHighest
+                            ),
+                            modifier = Modifier.height(32.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("0 dB (Vypnuté)", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("+5 dB (Stredné basy)", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("+10 dB (Silné basy)", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Car & Bluetooth Volume Stabilizer Toggle
+                    EnhancementToggleCard(
+                        icon = Icons.Default.GraphicEq,
+                        iconTint = Secondary,
+                        title = "Stabilizácia hlasitosti v aute / Bluetooth (Proti skákaniu zvuku)",
+                        subtitle = "Zabráni samovoľnému kolísaniu hlasitosti, skokom po pauze a stlmovaniu hudby pri tichých notifikáciách v aute",
+                        checked = uiState.bluetoothVolumeStabilizerEnabled,
+                        onCheckedChange = onToggleBluetoothStabilizer
+                    )
+
+                    // Spatial / Virtualizer Toggle
+                    EnhancementToggleCard(
+                        icon = Icons.Default.SurroundSound,
+                        iconTint = Secondary,
+                        title = "Priestorový 3D zvuk (Stereo Virtualizer)",
+                        subtitle = "Rozšíri stereo obraz – hudba znie priestorovejšie na slúchadlách aj reproduktoroch TV",
+                        checked = uiState.crossfeedEnabled,
+                        onCheckedChange = onToggleCrossfeed
+                    )
+
+                    // Auto-Gain Toggle
+                    EnhancementToggleCard(
+                        icon = Icons.Default.Shield,
+                        iconTint = Primary,
+                        title = "Ochrana proti chrčaniu reproduktorov (Auto-Gain)",
+                        subtitle = "Odporúčané zapnúť: Automaticky zabráni praskaniu a skresleniu, keď silno pridáš basy",
+                        checked = uiState.autoGainEnabled,
+                        onCheckedChange = onToggleAutoGain
+                    )
 
                     // Headphone AutoEq Profile Selector -> Opens AutoEQ Calibration Modal!
                     Row(
@@ -686,117 +751,29 @@ fun EqualizerScreen(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = uiState.selectedHeadphone.name,
+                                    text = "Nastavenie podľa modelu slúchadiel: ${uiState.selectedHeadphone.name}",
                                     color = OnSurface,
                                     fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "${uiState.selectedHeadphone.targetInfo} • Pre-amp ${uiState.selectedHeadphone.preampDb}",
+                                    text = "Klikni sem ak používaš slúchadlá (Sony, JBL, Samsung, Sennheiser…) a vyber si svoj model",
                                     color = OnSurfaceVariant,
                                     fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    lineHeight = 14.sp
                                 )
                             }
                         }
 
                         Icon(
                             imageVector = Icons.Default.SwapHoriz,
-                            contentDescription = "Zmeniť AutoEQ slúchadlá",
+                            contentDescription = "Zmeniť slúchadlá",
                             tint = Secondary,
                             modifier = Modifier.size(22.dp)
                         )
                     }
-
-                    // Sub-bass Zosilňovač (Bass Boost)
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceContainer)
-                            .padding(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Speaker,
-                                    contentDescription = null,
-                                    tint = Primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Sub-bass Zosilňovač (Bass Boost)",
-                                    color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(SurfaceContainerHighest)
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = String.format(Locale.US, "+%.1f dB @ 55 Hz", uiState.subBassBoostDb),
-                                    color = Secondary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        Slider(
-                            value = uiState.subBassBoostDb,
-                            onValueChange = onSubBassBoostChange,
-                            valueRange = 0f..10f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = Primary,
-                                activeTrackColor = Primary,
-                                inactiveTrackColor = SurfaceContainerHighest
-                            ),
-                            modifier = Modifier.height(32.dp)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Vypnuté", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("Rezaná frekvencia: 55 Hz strmosť 24dB/oct", color = OnSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text("+10 dB", color = OnSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // Crossfeed Toggle
-                    EnhancementToggleCard(
-                        icon = Icons.Default.SurroundSound,
-                        iconTint = Secondary,
-                        title = "Crossfeed priestorový filter",
-                        subtitle = "Znižuje únavu uší pri dlhom posluchu cez slúchadlá",
-                        checked = uiState.crossfeedEnabled,
-                        onCheckedChange = onToggleCrossfeed
-                    )
-
-                    // Auto-Gain Toggle
-                    EnhancementToggleCard(
-                        icon = Icons.Default.Shield,
-                        iconTint = Primary,
-                        title = "Automatická kompenzácia zisku (Auto-Gain)",
-                        subtitle = "Aktívna ochrana proti inter-sample digitálnemu orezaniu (clipping)",
-                        checked = uiState.autoGainEnabled,
-                        onCheckedChange = onToggleAutoGain
-                    )
                 }
             }
         }

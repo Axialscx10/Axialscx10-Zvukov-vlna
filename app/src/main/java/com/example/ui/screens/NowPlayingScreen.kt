@@ -55,18 +55,23 @@ import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.material.icons.outlined.ThumbUp
 import com.example.data.SleepTimerOption
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.example.ui.components.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -79,9 +84,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.TrackItem
 import com.example.data.formatMs
+import com.example.isTelevision
 import com.example.ui.SoundWaveUiState
 import com.example.ui.components.AnimatedEqualizerBars
 import com.example.ui.components.NetImage
+import com.example.ui.components.TvFullscreenVisualizerOverlay
+import com.example.ui.components.TvNowPlayingVisualizerStage
+import com.example.ui.components.TvVisualizerMode
 import com.example.ui.theme.OnSurface
 import com.example.ui.theme.OnSurfaceVariant
 import com.example.ui.theme.Primary
@@ -122,6 +131,14 @@ fun NowPlayingScreen(
     onRemoveFromQueue: (Int) -> Unit = {},
     onClearUpcomingQueue: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val isTv = remember(context) { isTelevision(context) }
+    var visualizerModeId by rememberSaveable { mutableStateOf(TvVisualizerMode.SPECTRUM.id) }
+    val visualizerMode = remember(visualizerModeId) {
+        TvVisualizerMode.entries.firstOrNull { it.id == visualizerModeId } ?: TvVisualizerMode.SPECTRUM
+    }
+    var showFullscreenVisualizer by rememberSaveable { mutableStateOf(false) }
+
     val isLiked = uiState.currentTrack.id in uiState.likedTrackIds
     val isDownloaded = uiState.currentTrack.id in uiState.downloadedTrackIds
     val isDownloading = uiState.currentTrack.id in uiState.downloadingTrackIds
@@ -164,149 +181,164 @@ fun NowPlayingScreen(
         )
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundBrush)
-            .testTag("now_playing_screen"),
-        contentPadding = PaddingValues(bottom = 36.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Sub-Header Context Pill & Lossless Badge
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(backgroundBrush)
+                .testTag("now_playing_screen"),
+            contentPadding = PaddingValues(bottom = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Sub-Header Context Pill & Lossless Badge
+            item {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(SurfaceContainer.copy(alpha = 0.75f))
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.GraphicEq,
-                        contentDescription = null,
-                        tint = SecondaryFixed,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = buildAnnotatedString {
-                            withStyle(SpanStyle(color = OnSurfaceVariant)) {
-                                append("Prehráva sa z: ")
-                            }
-                            withStyle(SpanStyle(color = OnSurface, fontWeight = FontWeight.SemiBold)) {
-                                append(uiState.playingFrom.ifBlank { "Navidrome" })
-                            }
-                        },
-                        fontSize = 12.sp
-                    )
-                }
-
-                if (uiState.currentTrack.techLine.isNotBlank()) {
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(SurfaceContainerHigh.copy(alpha = 0.85f))
-                            .clickable { onOpenStreamingSettings() }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .background(SurfaceContainer.copy(alpha = 0.75f))
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(SecondaryFixedDim)
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            tint = SecondaryFixed,
+                            modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = uiState.currentTrack.techLine.uppercase(),
-                            color = Secondary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.4.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = OnSurfaceVariant)) {
+                                    append("Prehráva sa z: ")
+                                }
+                                withStyle(SpanStyle(color = OnSurface, fontWeight = FontWeight.SemiBold)) {
+                                    append(uiState.playingFrom.ifBlank { "Navidrome" })
+                                }
+                            },
+                            fontSize = 12.sp
                         )
                     }
-                }
-            }
-        }
 
-        // Main Player Display Area: Artwork, Metadata, Waveform, Controls
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Album Artwork Container
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .shadow(28.dp, RoundedCornerShape(20.dp), ambientColor = dynamicTopColor, spotColor = dynamicTopColor)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(SurfaceContainerLowest)
-                ) {
-                    NetImage(
-                        url = uiState.currentTrack.imageUrl,
-                        contentDescription = uiState.currentTrack.title,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        SurfaceContainerLowest.copy(alpha = 0.65f)
-                                    )
-                                )
-                            )
-                    )
-
-                    // Floating format chip (real file format of the playing track)
-                    if (uiState.currentTrack.badge.isNotBlank()) {
+                    if (uiState.currentTrack.techLine.isNotBlank()) {
                         Row(
                             modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(12.dp)
                                 .clip(RoundedCornerShape(50))
-                                .background(SurfaceContainerLowest.copy(alpha = 0.85f))
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                                .background(SurfaceContainerHigh.copy(alpha = 0.85f))
+                                .clickable { onOpenStreamingSettings() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (uiState.isPlaying) {
-                                AnimatedEqualizerBars(
-                                    barColor = Primary,
-                                    secondaryBarColor = SecondaryFixedDim,
-                                    barWidth = 2.dp,
-                                    maxHeight = 12.dp
-                                )
-                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(SecondaryFixedDim)
+                            )
                             Text(
-                                text = uiState.currentTrack.badge,
-                                color = OnSurface,
+                                text = uiState.currentTrack.techLine.uppercase(),
+                                color = Secondary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.6.sp,
+                                letterSpacing = 0.4.sp,
                                 maxLines = 1,
-                                softWrap = false
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(20.dp))
+            // Main Player Display Area: Artwork (on Mobile) OR Live 60fps Visualizer Stage (on TV), Metadata, Waveform, Controls
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (isTv) {
+                        // Dedicated Widescreen TV Audio Visualizer Stage + 4 Style Switchers + Fullscreen Button
+                        TvNowPlayingVisualizerStage(
+                            uiState = uiState,
+                            visualizerMode = visualizerMode,
+                            accentColor = dynamicTopColor,
+                            onCycleMode = { visualizerModeId = visualizerMode.next().id },
+                            onSelectMode = { visualizerModeId = it.id },
+                            onOpenFullscreen = { showFullscreenVisualizer = true },
+                            onOpenArtistDetail = onOpenArtistDetail,
+                            onOpenAlbumDetail = onOpenAlbumDetail
+                        )
+                    } else {
+                        // Mobile Portrait Album Artwork Container (clean, no visualizer clutter)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .shadow(28.dp, RoundedCornerShape(20.dp), ambientColor = dynamicTopColor, spotColor = dynamicTopColor)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(SurfaceContainerLowest)
+                        ) {
+                            NetImage(
+                                url = uiState.currentTrack.imageUrl,
+                                contentDescription = uiState.currentTrack.title,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                SurfaceContainerLowest.copy(alpha = 0.65f)
+                                            )
+                                        )
+                                    )
+                            )
+
+                            // Floating format chip (real file format of the playing track)
+                            if (uiState.currentTrack.badge.isNotBlank()) {
+                                Row(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(12.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(SurfaceContainerLowest.copy(alpha = 0.85f))
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (uiState.isPlaying) {
+                                        AnimatedEqualizerBars(
+                                            barColor = Primary,
+                                            secondaryBarColor = SecondaryFixedDim,
+                                            barWidth = 2.dp,
+                                            maxHeight = 12.dp
+                                        )
+                                    }
+                                    Text(
+                                        text = uiState.currentTrack.badge,
+                                        color = OnSurface,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.6.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(if (isTv) 14.dp else 20.dp))
 
                 // Metadata & Primary Action Row
                 val artistDisplay = com.example.data.cleanArtistName(uiState.currentTrack.artist)
@@ -849,6 +881,20 @@ fun NowPlayingScreen(
             }
         }
     }
+
+        if (showFullscreenVisualizer) {
+            TvFullscreenVisualizerOverlay(
+                uiState = uiState,
+                visualizerMode = visualizerMode,
+                accentColor = dynamicTopColor,
+                onSelectMode = { visualizerModeId = it.id },
+                onTogglePlayPause = onTogglePlayPause,
+                onPreviousClick = onPreviousClick,
+                onNextClick = onNextClick,
+                onCloseFullscreen = { showFullscreenVisualizer = false }
+            )
+        }
+    }
 }
 
 @Composable
@@ -865,7 +911,7 @@ private fun NowPlayingDrawerContent(
     when (uiState.nowPlayingTab) {
         "ĎALŠIE", "NASLEDUJÚCE", "UP NEXT" -> {
             val startIdx = (uiState.queueIndex + 1).coerceAtLeast(0)
-            val upcoming = uiState.queue.drop(startIdx).take(50)
+            val upcoming = uiState.queue.drop(startIdx).take(15)
             if (upcoming.isEmpty()) {
                 DrawerHint("Fronta je prázdna. Spusti album alebo playlist a ďalšie skladby sa zobrazia tu.")
             } else {
@@ -1055,7 +1101,9 @@ private fun DrawerTrackRow(
         if (onArtistClick != null) {
             IconButton(
                 onClick = onArtistClick,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.Person,
@@ -1069,7 +1117,9 @@ private fun DrawerTrackRow(
         if (onMenuClick != null) {
             IconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
@@ -1083,7 +1133,9 @@ private fun DrawerTrackRow(
         if (onRemove != null) {
             IconButton(
                 onClick = onRemove,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,

@@ -64,7 +64,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.example.ui.components.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -547,9 +547,20 @@ fun StreamingSettingsScreen(
             }
         }
 
-        // Section 1: Kvalita streamovania
+        // Section 1: Kvalita zvuku a streamovania (Jednoduchý a okamžitý výber)
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val isRawOriginal = uiState.backendCodec == "FLAC Stream"
+            val currentRate = uiState.opusBitrateTarget
+            val activeQualitySummary = when {
+                isRawOriginal -> "Originál / FLAC (Bez straty kvality – Direct Play)"
+                uiState.backendCodec == "MP3 (LAME)" -> "Prekódovanie: MP3 • ${currentRate.replace("k", "")} kbps"
+                uiState.backendCodec == "Opus (libopus)" -> "Prekódovanie: Opus • ${currentRate.replace("k", "")} kbps"
+                else -> "Prekódovanie: Ogg Vorbis • ${currentRate.replace("k", "")} kbps"
+            }
+            val hasPlayingTrack = uiState.currentTrack.id.isNotBlank()
+            val sourceSuffix = uiState.currentTrack.suffix.uppercase(Locale.ROOT).ifBlank { "NEZNÁMY" }
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -566,22 +577,90 @@ fun StreamingSettingsScreen(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = "Kvalita streamovania",
+                            text = "Kvalita zvuku (Prehrávanie zo servera)",
                             color = OnSurface,
                             fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
                     Text(
-                        text = "WI-FI & LTE",
-                        color = Outline,
+                        text = "PREPÍNA NAŽIVO",
+                        color = SecondaryFixed,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 0.6.sp
                     )
                 }
 
-                // Wi-Fi Card
+                // Live Stream Monitor Box
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SurfaceContainerHigh)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "AKTÍVNY REŽIM STREAMU",
+                            color = SecondaryFixed,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(PrimaryContainer)
+                                .padding(horizontal = 10.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = if (isRawOriginal) "ORIGINÁL (FLAC / RAW)" else "${uiState.backendCodec.substringBefore(" ")} ${currentRate.uppercase()}",
+                                color = OnPrimaryContainer,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = activeQualitySummary,
+                        color = OnSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (hasPlayingTrack) {
+                        Text(
+                            text = "Práve hrá: „${uiState.currentTrack.title}“ • Súbor na serveri: $sourceSuffix (${uiState.currentTrack.techLine.ifBlank { "štandard" }})",
+                            color = OnSurfaceVariant,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                        if (sourceSuffix == "MP3" && isRawOriginal) {
+                            Text(
+                                text = "ℹ️ Táto skladba je na tvojom serveri uložená ako MP3. Prepnutie na FLAC nemôže zvýšiť kvalitu súboru, ktorý už je v MP3.",
+                                color = SecondaryFixed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "Keď pustíš skladbu a klikneš na ľubovoľnú kvalitu nižšie, zvuk sa okamžite prepne počas hrania.",
+                            color = OnSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // 4 Simple One-Click Quality Presets
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -590,150 +669,117 @@ fun StreamingSettingsScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(SurfaceContainerHigh),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Wifi,
-                                    contentDescription = null,
-                                    tint = Primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = "Streamovanie cez Wi-Fi",
-                                    color = OnSurface,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Bez obmedzenia dátovej spotreby",
-                                    color = Outline,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
+                    Text(
+                        text = "Vyber si kvalitu jedným kliknutím:",
+                        color = OnSurface,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                        Box(
+                    val presets = listOf(
+                        Triple(
+                            "ORIGINÁL / FLAC (Bez straty kvality)",
+                            "Odporúčané pre TV a Wi-Fi • Posiela presne pôvodný súbor zo servera bez kompresie",
+                            isRawOriginal
+                        ) to {
+                            onSelectBackendCodec("FLAC Stream")
+                        },
+                        Triple(
+                            "Vysoká kvalita (MP3 • 320 kbps)",
+                            "Čistý zvuk a plná kompatibilita • Menšia veľkosť dát ako pri FLAC",
+                            !isRawOriginal && uiState.backendCodec == "MP3 (LAME)" && currentRate == "320k"
+                        ) to {
+                            onSelectBackendCodec("MP3 (LAME)")
+                            onSelectOpusBitrate("320k")
+                        },
+                        Triple(
+                            "Štandardná kvalita (MP3 • 128 kbps)",
+                            "Ideálne na mobilné dáta alebo bežné Bluetooth reproduktory",
+                            !isRawOriginal && uiState.backendCodec == "MP3 (LAME)" && currentRate == "128k"
+                        ) to {
+                            onSelectBackendCodec("MP3 (LAME)")
+                            onSelectOpusBitrate("128k")
+                        },
+                        Triple(
+                            "Nízka kvalita / Test rozdielu (MP3 • 64 kbps)",
+                            "Maximálna úspora dát • Ideálne ak chceš hneď ušami počuť rozdiel oproti Originálu",
+                            !isRawOriginal && currentRate == "64k"
+                        ) to {
+                            onSelectBackendCodec("MP3 (LAME)")
+                            onSelectOpusBitrate("64k")
+                        }
+                    )
+
+                    presets.forEach { (info, action) ->
+                        val (title, subtitle, selected) = info
+                        Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(PrimaryContainer)
-                                .padding(horizontal = 10.dp, vertical = 3.dp)
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (selected) Primary.copy(alpha = 0.18f) else SurfaceContainerLow)
+                                .clickable { action() }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "Direct Play",
-                                color = OnPrimaryContainer,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = title,
+                                    color = if (selected) Primary else OnSurface,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = subtitle,
+                                    color = OnSurfaceVariant,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Icon(
+                                imageVector = if (selected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = title,
+                                tint = if (selected) Primary else Outline,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
 
+                    // Mobile Data Saver Switch
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(SurfaceContainerLow)
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Primary,
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .size(18.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Pôvodný FLAC / ALAC štúdiový formát",
-                                    color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(
-                                    text = "24-bit / 192 kHz",
-                                    color = Secondary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Pôvodný súbor bez rekompresie • Priemerný bitrate ~1 411 - 4 608 kbps",
-                                color = Outline,
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-                }
-
-                // Cellular Card
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceContainer)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .clickable { onToggleCellularTranscoding() }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(SurfaceContainerHigh),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SignalCellularAlt,
-                                    contentDescription = null,
-                                    tint = Secondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.SignalCellularAlt,
+                                contentDescription = null,
+                                tint = Secondary,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Column {
                                 Text(
-                                    text = "Mobilné dáta",
+                                    text = "Automaticky šetriť mobilné dáta mimo Wi-Fi",
                                     color = OnSurface,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "Adaptívne serverové transkódovanie",
-                                    color = Outline,
-                                    fontSize = 12.sp
+                                    text = "Keď nie si na Wi-Fi, automaticky zníži tok na MP3, aby sa nemíňali dáta",
+                                    color = OnSurfaceVariant,
+                                    fontSize = 11.sp
                                 )
                             }
                         }
@@ -749,598 +795,13 @@ fun StreamingSettingsScreen(
                             )
                         )
                     }
-
-                    // Bitrate Segmented Control
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Cieľový dátový tok (Opus VBR)",
-                                color = OnSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = if (uiState.opusBitrateTarget == "Auto") "Auto VBR" else "${uiState.opusBitrateTarget.replace("k", "")} kbps",
-                                color = Primary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(SurfaceContainerLow)
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            listOf("Auto", "128k", "256k", "320k").forEach { rate ->
-                                val selected = uiState.opusBitrateTarget == rate
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) SurfaceBright else Color.Transparent)
-                                        .clickable { onSelectOpusBitrate(rate) }
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = rate,
-                                        color = if (selected) OnSurface else Outline,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Data Savings Chip
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(SurfaceContainerHigh.copy(alpha = 0.65f))
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DataSaverOn,
-                            contentDescription = null,
-                            tint = Secondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = buildAnnotatedString {
-                                withStyle(SpanStyle(color = OnSurfaceVariant)) {
-                                    append("Približne ")
-                                }
-                                withStyle(SpanStyle(color = Secondary, fontWeight = FontWeight.Bold)) {
-                                    append("~72% úspora dát")
-                                }
-                                withStyle(SpanStyle(color = OnSurfaceVariant)) {
-                                    append(" voči bezstratovému FLAC pri zachovaní transparentnej štúdiovej akustiky.")
-                                }
-                            },
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp
-                        )
-                    }
                 }
             }
         }
 
-        // Section 2: Serverové transkódovanie ffmpeg (skryté v zjednodušenom režime)
+        // Section 2: Manuálny výber formátu a dátového toku (ak si chceš nastaviť vlastný kodek)
         if (!uiState.isSimpleMode) {
             item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Terminal,
-                            contentDescription = null,
-                            tint = Primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Serverové transkódovanie ffmpeg",
-                            color = OnSurface,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Text(
-                        text = "Navidrome Daemon",
-                        color = SecondaryFixed,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceContainer)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "Formát transkódovania backendu",
-                        color = OnSurface,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CodecRadioCard(
-                            title = "Opus (libopus)",
-                            subtitle = "Nízka latencia • Hi-Res",
-                            selected = uiState.backendCodec == "Opus (libopus)",
-                            onClick = { onSelectBackendCodec("Opus (libopus)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        CodecRadioCard(
-                            title = "FLAC Stream",
-                            subtitle = "Direct Subsonic",
-                            selected = uiState.backendCodec == "FLAC Stream",
-                            onClick = { onSelectBackendCodec("FLAC Stream") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CodecRadioCard(
-                            title = "MP3 (LAME)",
-                            subtitle = "Univerzálna kompatibilita",
-                            selected = uiState.backendCodec == "MP3 (LAME)",
-                            onClick = { onSelectBackendCodec("MP3 (LAME)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        CodecRadioCard(
-                            title = "Ogg Vorbis",
-                            subtitle = "Legacy fallback",
-                            selected = uiState.backendCodec == "Ogg Vorbis",
-                            onClick = { onSelectBackendCodec("Ogg Vorbis") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Sample Rate Ceiling
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "Maximálna vzorkovacia frekvencia",
-                                color = OnSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Resampling filter SoX libsoxr",
-                                color = Outline,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(SurfaceContainerHigh)
-                                .clickable { onCycleSampleRate() }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = uiState.maxSampleRate,
-                                color = OnSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Icon(
-                                imageVector = Icons.Default.UnfoldMore,
-                                contentDescription = null,
-                                tint = Outline,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    // Hardware Acceleration (VAAPI / QSV)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(SurfaceContainerLow)
-                            .clickable { onToggleHardwareAccel() }
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DeveloperBoard,
-                                contentDescription = null,
-                                tint = Secondary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Hardvérová akcelerácia (VAAPI / QSV)",
-                                    color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Nastavuje sa na serveri (Navidrome / ffmpeg) – prepínač je zatiaľ len vizuálny",
-                                    color = Outline,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = uiState.hardwareAccelVaapi,
-                            onCheckedChange = { onToggleHardwareAccel() },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = OnSecondaryContainer,
-                                checkedTrackColor = SecondaryContainer,
-                                uncheckedThumbColor = OnSurfaceVariant,
-                                uncheckedTrackColor = SurfaceContainerHighest
-                            )
-                        )
-                    }
-                }
-            }
-        }
-        }
-
-        // Section 3: Audio výstup & Audiophile
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Album,
-                            contentDescription = null,
-                            tint = Primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Audio výstup & Audiophile",
-                            color = OnSurface,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Text(
-                        text = "Hi-Res Engine",
-                        color = Primary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceContainer)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // Bit-perfect Exclusive Mode
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(SurfaceContainerHigh),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Usb,
-                                    contentDescription = null,
-                                    tint = Primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "Bit-perfect Exclusive Mode",
-                                        color = OnSurface,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(PrimaryContainer)
-                                            .padding(horizontal = 6.dp, vertical = 1.dp)
-                                    ) {
-                                        Text(
-                                            text = "DAC",
-                                            color = OnPrimaryContainer,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Obchádza interný systémový audio resampler a posiela čistý bitstream priamo do USB/Lighting DAC prevodníka.",
-                                    color = Outline,
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = uiState.bitPerfectExclusiveMode,
-                            onCheckedChange = { onToggleBitPerfect() },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = OnPrimary,
-                                checkedTrackColor = PrimaryContainer,
-                                uncheckedThumbColor = OnSurfaceVariant,
-                                uncheckedTrackColor = SurfaceContainerHighest
-                            )
-                        )
-                    }
-
-                    // ReplayGain Section
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceContainerLow)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = null,
-                                    tint = OnSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "ReplayGain (Normalizácia)",
-                                    color = OnSurface,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Switch(
-                                checked = uiState.replayGainEnabled,
-                                onCheckedChange = { onToggleReplayGain() },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = OnPrimary,
-                                    checkedTrackColor = PrimaryContainer,
-                                    uncheckedThumbColor = OnSurfaceVariant,
-                                    uncheckedTrackColor = SurfaceContainerHighest
-                                )
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(SurfaceContainerHigh)
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            listOf("Album Gain (Zachová dynamiku)", "Track Gain").forEach { mode ->
-                                val selected = uiState.replayGainMode == mode
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) SurfaceBright else Color.Transparent)
-                                        .clickable { onSelectReplayGainMode(mode) }
-                                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = mode,
-                                        color = if (selected) OnSurface else Outline,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Pre-amp kompenzačný zisk",
-                                color = Outline,
-                                fontSize = 11.sp
-                            )
-                            Text(
-                                text = String.format(Locale.US, "%.1f dB", uiState.replayGainPreampDb),
-                                color = Primary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        Slider(
-                            value = uiState.replayGainPreampDb,
-                            onValueChange = onReplayGainPreampChange,
-                            valueRange = -6f..6f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = PrimaryFixed,
-                                activeTrackColor = Primary,
-                                inactiveTrackColor = SurfaceContainerHighest
-                            ),
-                            modifier = Modifier.height(26.dp)
-                        )
-                    }
-
-                    // Gapless & Crossfade
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Prehrávanie bez medzier (Gapless)",
-                                color = OnSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Plynulý prechod stôp pre FLAC, ALAC a Opus",
-                                color = Outline,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = uiState.gaplessEnabled,
-                            onCheckedChange = { onToggleGapless() },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = OnPrimary,
-                                checkedTrackColor = PrimaryContainer,
-                                uncheckedThumbColor = OnSurfaceVariant,
-                                uncheckedTrackColor = SurfaceContainerHighest
-                            )
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Prelínanie skladieb (Crossfade)",
-                                color = Outline,
-                                fontSize = 12.sp
-                            )
-                            Text(
-                                text = if (uiState.crossfadeSeconds == 0) "0 s (Vypnuté)" else "${uiState.crossfadeSeconds} s",
-                                color = OnSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        Slider(
-                            value = uiState.crossfadeSeconds.toFloat(),
-                            onValueChange = { onCrossfadeChange(it.toInt()) },
-                            valueRange = 0f..12f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = SurfaceBright,
-                                activeTrackColor = Primary,
-                                inactiveTrackColor = SurfaceContainerHighest
-                            ),
-                            modifier = Modifier.height(26.dp)
-                        )
-
-                        Text(
-                            text = "Odporúčané pre autentické živé a konceptuálne albumy.",
-                            color = OutlineVariant,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section 4: Vyrovnávacia pamäť & Cache
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            tint = Primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Vyrovnávacia pamäť & Cache",
-                            color = OnSurface,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Text(
-                        text = "Buffer",
-                        color = Outline,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1350,165 +811,386 @@ fun StreamingSettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(SurfaceContainerLow)
-                                .padding(12.dp)
-                        ) {
-                            Text("Pre-buffer vopred", color = Outline, fontSize = 11.sp)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("3 skladby", color = OnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text("~50 MB alokovaných", color = Secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(SurfaceContainerLow)
-                                .padding(12.dp)
-                        ) {
-                            Text("Audio streaming buffer", color = Outline, fontSize = 11.sp)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("10 sekúnd", color = OnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Zero-drop prenos", color = Primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(SurfaceContainerHigh)
-                            .clickable { onClearCache() }
-                            .padding(12.dp)
-                            .testTag("clear_cache_btn"),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CleaningServices,
-                                contentDescription = null,
-                                tint = Outline,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Vymazať dočasnú vyrovnávaciu pamäť",
-                                    color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = uiState.cacheSizeText,
-                                    color = Outline,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
                         Icon(
-                            imageVector = Icons.Default.ChevronRight,
+                            imageVector = Icons.Default.Tune,
                             contentDescription = null,
-                            tint = Outline,
+                            tint = Primary,
                             modifier = Modifier.size(18.dp)
                         )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(SurfaceContainerHigh)
-                            .clickable { onClearDownloads() }
-                            .padding(12.dp)
-                            .testTag("clear_downloads_btn"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = null,
-                                tint = Primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Vymazať stiahnuté offline skladby",
-                                    color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "${uiState.downloadedTracks.size} skladieb zaberá ${uiState.downloadedSizeText}",
-                                    color = Outline,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = Outline,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section 5: Diagnostic Action Button (skryté v zjednodušenom režime)
-        if (!uiState.isSimpleMode) {
-            item {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .shadow(14.dp, RoundedCornerShape(50), spotColor = PrimaryContainer)
-                            .clip(RoundedCornerShape(50))
-                            .background(Primary)
-                            .clickable { onRunDiagnostics() }
-                            .testTag("test_diagnostics_btn"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = if (uiState.isTestingDiagnostics) Icons.Default.Sync else Icons.Default.NetworkCheck,
-                            contentDescription = null,
-                            tint = OnPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (uiState.isTestingDiagnostics) "Pripájam ffmpeg test stream..." else "Otestovať transkódovanie a latenciu",
-                            color = OnPrimary,
+                            text = "Ručné nastavenie formátu a dátového toku (kbps)",
+                            color = OnSurface,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
-                    AnimatedVisibility(visible = uiState.diagnosticResultVisible) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CodecRadioCard(
+                            title = "Originál (FLAC)",
+                            subtitle = "Bez kompresie",
+                            selected = uiState.backendCodec == "FLAC Stream",
+                            onClick = { onSelectBackendCodec("FLAC Stream") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        CodecRadioCard(
+                            title = "MP3 (LAME)",
+                            subtitle = "Najlepšia podpora",
+                            selected = uiState.backendCodec == "MP3 (LAME)",
+                            onClick = { onSelectBackendCodec("MP3 (LAME)") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CodecRadioCard(
+                            title = "Opus",
+                            subtitle = "Moderná kompresia",
+                            selected = uiState.backendCodec == "Opus (libopus)",
+                            onClick = { onSelectBackendCodec("Opus (libopus)") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        CodecRadioCard(
+                            title = "Ogg Vorbis",
+                            subtitle = "Alternatívny formát",
+                            selected = uiState.backendCodec == "Ogg Vorbis",
+                            onClick = { onSelectBackendCodec("Ogg Vorbis") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Text(
+                        text = "Dátový tok pri prekódovaní (MP3 / Opus / Ogg):",
+                        color = OnSurfaceVariant,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SurfaceContainerLow)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("64k", "128k", "192k", "256k", "320k").forEach { rate ->
+                            val selected = uiState.opusBitrateTarget == rate && uiState.backendCodec != "FLAC Stream"
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) Primary else Color.Transparent)
+                                    .clickable { onSelectOpusBitrate(rate) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = rate.replace("k", " kbps"),
+                                    color = if (selected) OnPrimary else OnSurface,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 3: Čo nastaviť v Navidrome a prečo niekedy nepočuť rozdiel (Praktické vysvetlenie)
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceContainerLow)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = SecondaryFixed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Čo nastaviť v Navidrome & prečo nepočuť rozdiel?",
+                        color = OnSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = "1. Záleží na tom, v čom je skladba uložená na serveri:\n" +
+                        "Ak je pesnička na tvojom disku uložená ako MP3 (napr. 192 alebo 320 kbps), prepnutie na FLAC z nej neurobí štúdiové FLAC. Hore v rámčeku vždy vidíš, či je súbor na serveri skutočne FLAC alebo MP3.",
+                    color = OnSurfaceVariant,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+
+                Text(
+                    text = "2. Rozdiel medzi FLAC a MP3 320 kbps:\n" +
+                        "Na reproduktoroch TV alebo cez Bluetooth slúchadlá (ktoré zvuk samé komprimujú) je rozdiel medzi FLAC a MP3 320 kbps takmer nepočuteľný. Ak si chceš overiť, že prepínanie kvality funguje, prepni vyššie na „Nízka kvalita (64 kbps)“ – rozdiel vo výškach a čineloch budeš počuť okamžite.",
+                    color = OnSurfaceVariant,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+
+                Text(
+                    text = "3. Treba niečo nastaviť v Navidrome?\n" +
+                        "• Ak počúvaš v režime „Originál / FLAC“, v Navidrome netreba nastavovať vôbec nič.\n" +
+                        "• Ak chceš, aby Navidrome naozaj prekódoval FLAC súbory na menšie MP3/Opus, otvor svoj Navidrome cez webový prehliadač -> klikni vpravo hore na ikonu používateľa -> Prehrávače (Players) -> nájdi „SoundWave“ a nastav Prekódovanie (Transcoding) na „mp3“.",
+                    color = OnSurface,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 17.sp
+                )
+            }
+        }
+
+        // Section 4: Vyrovnávanie hlasitosti (ReplayGain)
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceContainer)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Vyrovnávanie hlasitosti (ReplayGain)",
+                            color = OnSurface,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Automaticky vyrovná hlasitosť medzi staršími (tichšími) a novšími (hlasnejšími) skladbami",
+                            color = OnSurfaceVariant,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = uiState.replayGainEnabled,
+                        onCheckedChange = { onToggleReplayGain() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = OnPrimary,
+                            checkedTrackColor = PrimaryContainer,
+                            uncheckedThumbColor = OnSurfaceVariant,
+                            uncheckedTrackColor = SurfaceContainerHighest
+                        )
+                    )
+                }
+
+                if (uiState.replayGainEnabled) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Doladenie hlasitosti (Pre-amp)",
+                            color = OnSurfaceVariant,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = String.format(Locale.US, "%s%.1f dB", if (uiState.replayGainPreampDb > 0f) "+" else "", uiState.replayGainPreampDb),
+                            color = Primary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Slider(
+                        value = uiState.replayGainPreampDb,
+                        onValueChange = onReplayGainPreampChange,
+                        valueRange = -6f..6f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = PrimaryFixed,
+                            activeTrackColor = Primary,
+                            inactiveTrackColor = SurfaceContainerHighest
+                        ),
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
+            }
+        }
+
+        // Section 5: Vyrovnávacia pamäť & Stiahnuté skladby
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceContainer)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Úložisko a vyrovnávacia pamäť",
+                    color = OnSurface,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceContainerHigh)
+                        .clickable { onClearCache() }
+                        .padding(12.dp)
+                        .testTag("clear_cache_btn"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CleaningServices,
+                            contentDescription = null,
+                            tint = Outline,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Vymazať dočasnú vyrovnávaciu pamäť",
+                                color = OnSurface,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = uiState.cacheSizeText,
+                                color = Outline,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = Outline,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceContainerHigh)
+                        .clickable { onClearDownloads() }
+                        .padding(12.dp)
+                        .testTag("clear_downloads_btn"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = Primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Vymazať stiahnuté offline skladby",
+                                color = OnSurface,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${uiState.downloadedTracks.size} skladieb zaberá ${uiState.downloadedSizeText}",
+                                color = Outline,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = Outline,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // Section 6: Testovacie tlačidlo (Diagnostika streamu a servera)
+        item {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .shadow(14.dp, RoundedCornerShape(50), spotColor = PrimaryContainer)
+                        .clip(RoundedCornerShape(50))
+                        .background(Primary)
+                        .clickable { onRunDiagnostics() }
+                        .testTag("test_diagnostics_btn"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = if (uiState.isTestingDiagnostics) Icons.Default.Sync else Icons.Default.NetworkCheck,
+                        contentDescription = null,
+                        tint = OnPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (uiState.isTestingDiagnostics) "Testujem spojenie a formát..." else "Otestovať čo presne posiela server (Test kvality)",
+                        color = OnPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                AnimatedVisibility(visible = uiState.diagnosticResultVisible) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceContainerHigh)
+                            .padding(14.dp)
+                    ) {
                         Text(
                             text = uiState.diagnosticResultText,
-                            color = Secondary,
+                            color = OnSurface,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 8.dp)
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 18.sp
                         )
                     }
                 }
@@ -1543,12 +1225,12 @@ fun StreamingSettingsScreen(
                     )
                 }
                 Text(
-                    text = "Verzia 6.1 (Build 16) • Pripravené pre Google TV a smartfóny",
+                    text = "Verzia 25.0 (Build 25) • Pripravené pre Google TV a smartfóny",
                     color = OnSurfaceVariant,
                     fontSize = 12.sp
                 )
                 Text(
-                    text = "Podpora Navidrome / Subsonic API v1.16.1 • Bezstratové FLAC & gapless prehrávanie • 10-pásmový DSP ekvalizér & AutoEQ profily",
+                    text = "Podpora Navidrome / Subsonic API v1.16.1 • Bezstratové FLAC & živé prepínanie kvality • 10-pásmový DSP ekvalizér & AutoEQ profily",
                     color = Outline,
                     fontSize = 11.sp,
                     lineHeight = 16.sp

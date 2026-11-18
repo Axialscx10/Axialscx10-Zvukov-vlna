@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
@@ -21,6 +23,8 @@ import java.security.SecureRandom
 import java.util.Locale
 import javax.net.ssl.SSLException
 
+import androidx.compose.runtime.Immutable
+
 /** Error returned by the server or while talking to it. [message] is already user-readable (Slovak). */
 class SubsonicException(message: String, val code: Int = 0) : Exception(message)
 
@@ -31,6 +35,7 @@ data class PingInfo(
     val openSubsonic: Boolean
 )
 
+@Immutable
 data class SearchResult(
     val artists: List<ArtistItem>,
     val albums: List<AlbumItem>,
@@ -79,10 +84,11 @@ class SubsonicApi(
         return sb.toString()
     }
 
-    /** Cover art URL. The URL is stable for a given login (salt does not change), so image caches work. */
-    fun coverUrl(coverArtId: String, size: Int = 600): String {
+    /** Cover art URL. Capped at 180px so Smart TVs and phones decode lightweight thumbnails in <1.5ms without OOM. */
+    fun coverUrl(coverArtId: String, size: Int = 180): String {
         if (coverArtId.isBlank()) return ""
-        return buildUrl("getCoverArt", listOf("id" to coverArtId, "size" to size.toString()), json = false)
+        val safeSize = size.coerceIn(100, 180)
+        return buildUrl("getCoverArt", listOf("id" to coverArtId, "size" to safeSize.toString()), json = false)
     }
 
     /**
@@ -184,108 +190,114 @@ class SubsonicApi(
 
     @Volatile
     private var cachedTrackPool: List<TrackItem>? = null
+    private val catalogPoolMutex = Mutex()
 
     @Volatile
     private var cachedAlbumPool: List<AlbumItem>? = null
+    private val albumPoolMutex = Mutex()
 
     @Volatile
     private var cachedRawGenres: List<GenreItem>? = null
 
-    private suspend fun rawGenres(): List<GenreItem> {
-        cachedRawGenres?.let { if (it.isNotEmpty()) return it }
+    @Volatile
+    private var cachedEnrichedGenres: List<GenreItem>? = null
+
+    @Volatile
+    private var cachedArtists: List<ArtistItem>? = null
+    private val artistsMutex = Mutex()
+
+    @Volatile
+    private var cachedPlaylists: List<PlaylistItem>? = null
+    private val playlistsMutex = Mutex()
+
+    private suspend fun rawGenres(): List<GenreItem> = withContext(Dispatchers.IO) {
+        cachedRawGenres?.let { if (it.isNotEmpty()) return@withContext it }
         val r = call("getGenres")
         val list = r.optJSONObject("genres")?.arr("genre").orEmpty()
             .map { GenreItem(it.optString("value").trim(), it.optInt("songCount")) }
             .filter { it.name.isNotBlank() }
             .sortedByDescending { it.songCount }
         if (list.isNotEmpty()) cachedRawGenres = list
-        return list
+        list
     }
 
     /**
-     * Loads and caches up to 3,500 tracks from the server in parallel so smart genres can rescue
-     * songs that were tagged simply as "Rock" or left untagged in their ID3 metadata.
+     * Loads and caches up to 220 tracks from the server in a Mutex-protected background pool
+     * so smart genres can rescue songs that were tagged simply as "Rock" or left untagged,
+     * without overloading Smart TV CPU/RAM.
      */
-    suspend fun getOrLoadCatalogPool(): List<TrackItem> = coroutineScope {
-        cachedTrackPool?.let { if (it.isNotEmpty()) return@coroutineScope it }
-        val raw = try { rawGenres() } catch (_: Exception) { emptyList() }
+    suspend fun getOrLoadCatalogPool(): List<TrackItem> = withContext(Dispatchers.IO) {
+        cachedTrackPool?.let { if (it.isNotEmpty()) return@withContext it }
+        catalogPoolMutex.withLock {
+            cachedTrackPool?.let { if (it.isNotEmpty()) return@withLock it }
+            val raw = try { rawGenres() } catch (_: Exception) { emptyList() }
 
-        // 1. Try OpenSubsonic / Navidrome search3 with empty query across 6 parallel pages (3,000 songs)
-        val searchPages = (0 until 6).map { pageIdx ->
-            async {
+            val searchTracks = try {
+                val r = call(
+                    "search3",
+                    listOf(
+                        "query" to "",
+                        "artistCount" to "0",
+                        "albumCount" to "0",
+                        "songCount" to "220",
+                        "songOffset" to "0"
+                    )
+                )
+                r.optJSONObject("searchResult3")?.arr("song").orEmpty().map(::songFrom)
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val topGenre = raw.firstOrNull()
+            val fallbackTracks = if (topGenre != null && searchTracks.size < 100) {
                 try {
                     val r = call(
-                        "search3",
+                        "getSongsByGenre",
                         listOf(
-                            "query" to "",
-                            "artistCount" to "0",
-                            "albumCount" to "0",
-                            "songCount" to "500",
-                            "songOffset" to (pageIdx * 500).toString()
+                            "genre" to topGenre.name,
+                            "count" to "220",
+                            "offset" to "0"
                         )
                     )
-                    r.optJSONObject("searchResult3")?.arr("song").orEmpty().map(::songFrom)
+                    r.optJSONObject("songsByGenre")?.arr("song").orEmpty().map(::songFrom)
                 } catch (_: Exception) {
                     emptyList()
                 }
+            } else {
+                emptyList()
             }
-        }.awaitAll().flatten()
 
-        // 2. Also pull from the top largest genre(s) (like "Rock") if search3 returned fewer tracks
-        val topGenre = raw.firstOrNull()
-        val rockPages = if (topGenre != null && searchPages.size < topGenre.songCount.coerceAtMost(2500)) {
-            val pagesNeeded = ((topGenre.songCount.coerceAtMost(3000) + 499) / 500).coerceIn(1, 6)
-            (0 until pagesNeeded).map { pageIdx ->
-                async {
-                    try {
-                        val r = call(
-                            "getSongsByGenre",
-                            listOf(
-                                "genre" to topGenre.name,
-                                "count" to "500",
-                                "offset" to (pageIdx * 500).toString()
-                            )
-                        )
-                        r.optJSONObject("songsByGenre")?.arr("song").orEmpty().map(::songFrom)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-            }.awaitAll().flatten()
-        } else {
-            emptyList()
+            val combined = (searchTracks + fallbackTracks).distinctBy { it.id }
+            if (combined.isNotEmpty()) {
+                cachedTrackPool = combined
+                cachedEnrichedGenres = null
+            }
+            combined
         }
-
-        val combined = (searchPages + rockPages).distinctBy { it.id }
-        if (combined.isNotEmpty()) {
-            cachedTrackPool = combined
-        }
-        combined
     }
 
-    suspend fun getOrLoadAlbumsPool(): List<AlbumItem> = coroutineScope {
-        cachedAlbumPool?.let { if (it.isNotEmpty()) return@coroutineScope it }
-        val pages = (0 until 4).map { pageIdx ->
-            async {
-                try {
-                    val r = call(
-                        "getAlbumList2",
-                        listOf(
-                            "type" to "alphabeticalByName",
-                            "size" to "500",
-                            "offset" to (pageIdx * 500).toString()
-                        )
+    suspend fun getOrLoadAlbumsPool(): List<AlbumItem> = withContext(Dispatchers.IO) {
+        cachedAlbumPool?.let { if (it.isNotEmpty()) return@withContext it }
+        albumPoolMutex.withLock {
+            cachedAlbumPool?.let { if (it.isNotEmpty()) return@withLock it }
+            val pages = try {
+                val r = call(
+                    "getAlbumList2",
+                    listOf(
+                        "type" to "alphabeticalByName",
+                        "size" to "150",
+                        "offset" to "0"
                     )
-                    r.optJSONObject("albumList2")?.arr("album").orEmpty().map(::albumFrom)
-                } catch (_: Exception) {
-                    emptyList()
-                }
+                )
+                r.optJSONObject("albumList2")?.arr("album").orEmpty().map(::albumFrom).distinctBy { it.id }
+            } catch (_: Exception) {
+                emptyList()
             }
-        }.awaitAll().flatten().distinctBy { it.id }
-        if (pages.isNotEmpty()) {
-            cachedAlbumPool = pages
+            if (pages.isNotEmpty()) {
+                cachedAlbumPool = pages
+            }
+            pages
         }
-        pages
     }
 
     /** type: newest, recent, frequent, random, alphabeticalByName, byGenre... */
@@ -295,7 +307,7 @@ class SubsonicApi(
         offset: Int = 0,
         genre: String? = null,
         allowSmartFallback: Boolean = true
-    ): List<AlbumItem> {
+    ): List<AlbumItem> = withContext(Dispatchers.IO) {
         if (type == "byGenre" && !genre.isNullOrBlank()) {
             val spec = if (allowSmartFallback) SmartGenreCatalog.findSpec(genre) else null
             val direct = try {
@@ -306,19 +318,25 @@ class SubsonicApi(
                 emptyList()
             }
             if (spec != null && direct.size < size && offset == 0) {
-                val poolAlbums = try { getOrLoadAlbumsPool() } catch (_: Exception) { emptyList() }
-                val matched = poolAlbums.filter { SmartGenreCatalog.matchesAlbum(it, spec) }
-                return (direct + matched).distinctBy { it.id }.take(size)
+                val poolAlbums = cachedAlbumPool.orEmpty()
+                if (poolAlbums.isNotEmpty()) {
+                    val matched = poolAlbums.filter { SmartGenreCatalog.matchesAlbum(it, spec) }
+                    return@withContext (direct + matched).distinctBy { it.id }.take(size)
+                }
             }
-            return direct
+            return@withContext direct
         }
         val params = mutableListOf("type" to type, "size" to size.toString(), "offset" to offset.toString())
         if (!genre.isNullOrBlank()) params += "genre" to genre
         val r = call("getAlbumList2", params)
-        return r.optJSONObject("albumList2")?.arr("album").orEmpty().map(::albumFrom)
+        val parsed = r.optJSONObject("albumList2")?.arr("album").orEmpty().map(::albumFrom)
+        if (type == "alphabeticalByName" && offset == 0 && parsed.size >= 100 && cachedAlbumPool == null) {
+            cachedAlbumPool = parsed
+        }
+        parsed
     }
 
-    suspend fun randomSongs(size: Int = 40, genre: String? = null): List<TrackItem> {
+    suspend fun randomSongs(size: Int = 40, genre: String? = null): List<TrackItem> = withContext(Dispatchers.IO) {
         if (!genre.isNullOrBlank()) {
             val spec = SmartGenreCatalog.findSpec(genre)
             val direct = try {
@@ -328,53 +346,70 @@ class SubsonicApi(
                 emptyList()
             }
             if (spec != null && direct.size < size) {
-                val pool = try { getOrLoadCatalogPool() } catch (_: Exception) { emptyList() }
-                val matched = pool.filter { SmartGenreCatalog.matchesTrack(it, spec) }.shuffled()
-                return (direct + matched).distinctBy { it.id }.take(size)
+                val pool = cachedTrackPool.orEmpty()
+                if (pool.isNotEmpty()) {
+                    val matched = pool.filter { SmartGenreCatalog.matchesTrack(it, spec) }.shuffled()
+                    return@withContext (direct + matched).distinctBy { it.id }.take(size)
+                }
             }
-            return direct
+            return@withContext direct
         }
         val params = mutableListOf("size" to size.toString())
         val r = call("getRandomSongs", params)
-        return r.optJSONObject("randomSongs")?.arr("song").orEmpty().map(::songFrom)
+        r.optJSONObject("randomSongs")?.arr("song").orEmpty().map(::songFrom)
     }
 
-    suspend fun artists(): List<ArtistItem> {
-        val r = call("getArtists")
-        val indexes = r.optJSONObject("artists")?.arr("index").orEmpty()
-        return indexes.flatMap { it.arr("artist") }.map(::artistFrom)
+    suspend fun artists(): List<ArtistItem> = withContext(Dispatchers.IO) {
+        cachedArtists?.let { if (it.isNotEmpty()) return@withContext it }
+        artistsMutex.withLock {
+            cachedArtists?.let { if (it.isNotEmpty()) return@withLock it }
+            val r = call("getArtists")
+            val indexes = r.optJSONObject("artists")?.arr("index").orEmpty()
+            val parsed = indexes.flatMap { it.arr("artist") }.map(::artistFrom)
+            if (parsed.isNotEmpty()) cachedArtists = parsed
+            parsed
+        }
     }
 
-    suspend fun playlists(): List<PlaylistItem> {
-        val r = call("getPlaylists")
-        return r.optJSONObject("playlists")?.arr("playlist").orEmpty().map(::playlistFrom)
+    suspend fun playlists(forceRefresh: Boolean = false): List<PlaylistItem> = withContext(Dispatchers.IO) {
+        if (!forceRefresh) {
+            cachedPlaylists?.let { if (it.isNotEmpty()) return@withContext it }
+        }
+        playlistsMutex.withLock {
+            if (!forceRefresh) {
+                cachedPlaylists?.let { if (it.isNotEmpty()) return@withLock it }
+            }
+            val r = call("getPlaylists")
+            val parsed = r.optJSONObject("playlists")?.arr("playlist").orEmpty().map(::playlistFrom)
+            if (parsed.isNotEmpty()) cachedPlaylists = parsed
+            parsed
+        }
     }
 
     /**
-     * Returns an enriched list of genres combining Smart Genres (populated from both server tags
-     * and artist/album/title/year classification of the catalog pool) with raw server genres.
+     * Returns an enriched list of genres combining Smart Genres with raw server genres.
+     * Fast & non-blocking on startup: uses `rawGenres()` (1 tiny HTTP call) + any already-cached
+     * track pool without downloading thousands of tracks during app launch!
      */
-    suspend fun genres(): List<GenreItem> = coroutineScope {
-        val rawDef = async { rawGenres() }
-        val poolDef = async { try { getOrLoadCatalogPool() } catch (_: Exception) { emptyList() } }
-        val raw = rawDef.await()
-        val pool = poolDef.await()
+    suspend fun genres(): List<GenreItem> = withContext(Dispatchers.IO) {
+        cachedEnrichedGenres?.let { if (it.isNotEmpty()) return@withContext it }
+        val raw = try { rawGenres() } catch (_: Exception) { emptyList() }
+        val pool = cachedTrackPool.orEmpty()
 
-        val smartItems = SmartGenreCatalog.specs.mapNotNull { spec ->
+        val smartItems = SmartGenreCatalog.specs.map { spec ->
             val matchingServerTagNames = SmartGenreCatalog.matchingServerGenres(spec.canonicalName, raw, spec)
                 .map { it.lowercase(Locale.ROOT) }
                 .toSet()
             val rawTagSum = raw
                 .filter { it.name.trim().lowercase(Locale.ROOT) in matchingServerTagNames }
                 .sumOf { it.songCount }
-            val poolMatches = pool.count { SmartGenreCatalog.matchesTrack(it, spec) }
-            // Estimate total distinct tracks for this smart genre
-            val totalCount = maxOf(rawTagSum, poolMatches, minOf(rawTagSum + poolMatches, pool.size.coerceAtLeast(rawTagSum)))
-            if (totalCount > 0) {
-                GenreItem(spec.canonicalName, totalCount)
+            val poolMatches = if (pool.isNotEmpty()) {
+                pool.count { SmartGenreCatalog.matchesTrack(it, spec) }
             } else {
-                null
+                0
             }
+            val totalCount = maxOf(rawTagSum, poolMatches)
+            GenreItem(spec.canonicalName, totalCount)
         }
 
         val coveredNames = SmartGenreCatalog.specs.flatMap {
@@ -385,33 +420,37 @@ class SubsonicApi(
             g.name.trim().lowercase(Locale.ROOT) !in coveredNames && g.songCount > 0
         }
 
-        // Put Smart Genres (sorted by songCount descending) alongside top server genres like Rock
-        (smartItems + remainingServerGenres)
+        val result = (remainingServerGenres + smartItems)
             .distinctBy { it.name.lowercase(Locale.ROOT) }
-            .sortedByDescending { it.songCount }
+            .sortedWith(compareByDescending<GenreItem> { it.songCount > 0 }.thenByDescending { it.songCount })
+        if (result.isNotEmpty()) {
+            cachedEnrichedGenres = result
+        }
+        result
     }
 
-    suspend fun search(query: String, artistCount: Int = 10, albumCount: Int = 16, songCount: Int = 40): SearchResult {
-        val r = call(
-            "search3",
-            listOf(
-                "query" to query,
-                "artistCount" to artistCount.toString(),
-                "albumCount" to albumCount.toString(),
-                "songCount" to songCount.toString()
+    suspend fun search(query: String, artistCount: Int = 10, albumCount: Int = 16, songCount: Int = 40): SearchResult =
+        withContext(Dispatchers.IO) {
+            val r = call(
+                "search3",
+                listOf(
+                    "query" to query,
+                    "artistCount" to artistCount.toString(),
+                    "albumCount" to albumCount.toString(),
+                    "songCount" to songCount.toString()
+                )
             )
-        )
-        val res = r.optJSONObject("searchResult3")
-        return SearchResult(
-            artists = res?.arr("artist").orEmpty().map(::artistFrom),
-            albums = res?.arr("album").orEmpty().map(::albumFrom),
-            tracks = res?.arr("song").orEmpty().map(::songFrom)
-        )
-    }
+            val res = r.optJSONObject("searchResult3")
+            SearchResult(
+                artists = res?.arr("artist").orEmpty().map(::artistFrom),
+                albums = res?.arr("album").orEmpty().map(::albumFrom),
+                tracks = res?.arr("song").orEmpty().map(::songFrom)
+            )
+        }
 
-    suspend fun starredTracks(): List<TrackItem> {
+    suspend fun starredTracks(): List<TrackItem> = withContext(Dispatchers.IO) {
         val r = call("getStarred2")
-        return r.optJSONObject("starred2")?.arr("song").orEmpty().map(::songFrom)
+        r.optJSONObject("starred2")?.arr("song").orEmpty().map(::songFrom)
     }
 
     suspend fun star(id: String) {
@@ -504,6 +543,7 @@ class SubsonicApi(
         val params = mutableListOf("name" to name)
         songIds.forEach { params += "songId" to it }
         call("createPlaylist", params)
+        cachedPlaylists = null
     }
 
     suspend fun startScan(): ScanStatus {
@@ -522,7 +562,7 @@ class SubsonicApi(
     // Detail pages (always returned as CollectionDetail)
     // ---------------------------------------------------------------------------------------------
 
-    suspend fun albumDetail(rawId: String): CollectionDetail {
+    suspend fun albumDetail(rawId: String): CollectionDetail = withContext(Dispatchers.IO) {
         val a = call("getAlbum", listOf("id" to rawId)).optJSONObject("album")
             ?: throw SubsonicException("Album sa nenašiel.")
         val tracks = a.arr("song").map(::songFrom)
@@ -531,7 +571,7 @@ class SubsonicApi(
         val rawArtist = cleanArtistName(a.optString("artist"))
         val subtitle = listOf(rawArtist, if (year > 0) year.toString() else "")
             .filter { it.isNotBlank() }.joinToString(" • ")
-        return CollectionDetail(
+        CollectionDetail(
             id = "al:$rawId",
             kind = "Album",
             title = cleanDisplayTitle(a.optString("name")),
@@ -542,13 +582,13 @@ class SubsonicApi(
         )
     }
 
-    suspend fun playlistDetail(rawId: String): CollectionDetail {
+    suspend fun playlistDetail(rawId: String): CollectionDetail = withContext(Dispatchers.IO) {
         val p = call("getPlaylist", listOf("id" to rawId)).optJSONObject("playlist")
             ?: throw SubsonicException("Playlist sa nenašiel.")
         val tracks = p.arr("entry").map(::songFrom)
         val cover = p.optString("coverArt").ifBlank { "pl-$rawId" }
         val owner = p.optString("owner")
-        return CollectionDetail(
+        CollectionDetail(
             id = "pl:$rawId",
             kind = "Playlist",
             title = p.optString("name"),
@@ -559,15 +599,15 @@ class SubsonicApi(
         )
     }
 
-    /** Artist page: lists the artist's albums and songs (up to 20 albums, loaded in parallel). */
-    suspend fun artistDetail(rawId: String): CollectionDetail {
+    /** Artist page: lists the artist's albums and songs (loaded in parallel on IO dispatcher). */
+    suspend fun artistDetail(rawId: String): CollectionDetail = withContext(Dispatchers.IO) {
         val a = call("getArtist", listOf("id" to rawId)).optJSONObject("artist")
             ?: throw SubsonicException("Interpret sa nenašiel.")
         val albums = a.arr("album")
         val albumItems = albums.map(::albumFrom)
         val tracks = coroutineScope {
-            albums.take(60).map { al ->
-                async {
+            albums.take(12).map { al ->
+                async(Dispatchers.IO) {
                     try {
                         val songs = call("getAlbum", listOf("id" to al.optString("id")))
                             .optJSONObject("album")?.arr("song").orEmpty()
@@ -579,7 +619,7 @@ class SubsonicApi(
             }.awaitAll().flatten()
         }
         val cover = a.optString("coverArt").ifBlank { "ar-$rawId" }
-        return CollectionDetail(
+        CollectionDetail(
             id = "ar:$rawId",
             kind = "Interpret",
             title = a.optString("name"),
@@ -593,13 +633,11 @@ class SubsonicApi(
 
     /**
      * Resolves an artist by name when a track in a mix/queue has an empty or compilation artistId.
-     * Searches Navidrome for the artist, loads their full discography (albums + tracks) if found,
-     * or builds a collection from all matching albums and songs on the server.
      */
-    suspend fun artistDetailByName(rawName: String): CollectionDetail {
+    suspend fun artistDetailByName(rawName: String): CollectionDetail = withContext(Dispatchers.IO) {
         val cleaned = cleanArtistName(rawName).trim()
         val primary = cleaned
-            .split(Regex("(?i)\\s+(feat\\.?|ft\\.?|with|vs\\.?)\\s+|[,;/&]"))
+            .split(ARTIST_FEAT_SPLIT_REGEX)
             .firstOrNull()?.trim()
             .orEmpty()
             .ifBlank { cleaned }
@@ -622,7 +660,7 @@ class SubsonicApi(
                 try {
                     val detail = artistDetail(rawId)
                     if (detail.tracks.isNotEmpty() || detail.albums.isNotEmpty()) {
-                        return detail
+                        return@withContext detail
                     }
                 } catch (_: SubsonicException) {
                     // Fall back to search results below if getArtist fails
@@ -654,7 +692,7 @@ class SubsonicApi(
             ?: matchingAlbums.firstOrNull()?.imageUrl?.takeIf { it.isNotBlank() }
             ?: matchingTracks.firstOrNull()?.imageUrl.orEmpty()
 
-        return CollectionDetail(
+        CollectionDetail(
             id = "ar_name:$query",
             kind = "Interpret",
             title = displayTitle,
@@ -669,7 +707,7 @@ class SubsonicApi(
     /**
      * Resolves an album by name when a track in a mix/queue has an empty albumId.
      */
-    suspend fun albumDetailByName(rawAlbumName: String): CollectionDetail {
+    suspend fun albumDetailByName(rawAlbumName: String): CollectionDetail = withContext(Dispatchers.IO) {
         val cleaned = cleanAlbumName(rawAlbumName).trim().ifBlank { rawAlbumName.trim() }
         if (cleaned.isBlank()) throw SubsonicException("Názov albumu nie je uvedený.")
         val sr = search(cleaned, artistCount = 5, albumCount = 25, songCount = 100)
@@ -682,7 +720,7 @@ class SubsonicApi(
         if (matchedAlbum != null) {
             val rawId = matchedAlbum.id.removePrefix("al:")
             if (rawId.isNotBlank()) {
-                return albumDetail(rawId)
+                return@withContext albumDetail(rawId)
             }
         }
 
@@ -694,7 +732,7 @@ class SubsonicApi(
             throw SubsonicException("Album „$cleaned“ sa na serveri nenašiel.")
         }
 
-        return CollectionDetail(
+        CollectionDetail(
             id = "al_name:$cleaned",
             kind = "Album",
             title = cleaned,
@@ -705,9 +743,9 @@ class SubsonicApi(
         )
     }
 
-    suspend fun favoritesDetail(): CollectionDetail {
+    suspend fun favoritesDetail(): CollectionDetail = withContext(Dispatchers.IO) {
         val tracks = starredTracks()
-        return CollectionDetail(
+        CollectionDetail(
             id = "fav",
             kind = "Zbierka",
             title = "Obľúbené skladby",
@@ -718,25 +756,24 @@ class SubsonicApi(
         )
     }
 
-    suspend fun genreDetail(genre: String, maxTracks: Int = 5000): CollectionDetail = coroutineScope {
+    suspend fun genreDetail(genre: String, maxTracks: Int = 250): CollectionDetail = withContext(Dispatchers.IO) {
         val spec = SmartGenreCatalog.findSpec(genre)
         val serverGenres = try { rawGenres() } catch (_: Exception) { emptyList() }
         val matchingTags = SmartGenreCatalog.matchingServerGenres(genre, serverGenres, spec)
             .distinctBy { it.lowercase(Locale.ROOT) }
 
-        val tracksByTagDeferred = async {
-            val allSongs = mutableListOf<TrackItem>()
-            for (tag in matchingTags.take(6)) {
-                var offset = 0
-                val pageSize = 500
-                while (offset < maxTracks && allSongs.size < maxTracks) {
+        val (tracksByTag, albumsByTag) = coroutineScope {
+            val tracksByTagDeferred = async(Dispatchers.IO) {
+                val allSongs = mutableListOf<TrackItem>()
+                for (tag in matchingTags.take(2)) {
+                    if (allSongs.size >= maxTracks) break
                     val page = try {
                         val r = call(
                             "getSongsByGenre",
                             listOf(
                                 "genre" to tag,
-                                "count" to pageSize.toString(),
-                                "offset" to offset.toString()
+                                "count" to maxTracks.toString(),
+                                "offset" to "0"
                             )
                         )
                         r.optJSONObject("songsByGenre")?.arr("song").orEmpty().map(::songFrom)
@@ -744,64 +781,56 @@ class SubsonicApi(
                         emptyList()
                     }
                     allSongs += page
-                    if (page.size < pageSize) break
-                    offset += pageSize
                 }
+                allSongs.distinctBy { it.id }
             }
-            allSongs.distinctBy { it.id }
-        }
 
-        val albumsByTagDeferred = async {
-            val allAlbums = mutableListOf<AlbumItem>()
-            for (tag in matchingTags.take(5)) {
-                var offset = 0
-                val pageSize = 500
-                while (offset < 1000 && allAlbums.size < 1500) {
+            val albumsByTagDeferred = async(Dispatchers.IO) {
+                val allAlbums = mutableListOf<AlbumItem>()
+                for (tag in matchingTags.take(2)) {
+                    if (allAlbums.size >= 150) break
                     val page = try {
-                        albumList("byGenre", size = pageSize, offset = offset, genre = tag, allowSmartFallback = false)
+                        albumList("byGenre", size = 150, offset = 0, genre = tag, allowSmartFallback = false)
                     } catch (_: Exception) {
                         emptyList()
                     }
                     allAlbums += page
-                    if (page.size < pageSize) break
-                    offset += pageSize
                 }
+                allAlbums.distinctBy { it.id }
             }
-            allAlbums.distinctBy { it.id }
+
+            tracksByTagDeferred.await() to albumsByTagDeferred.await()
         }
 
-        val smartPoolTracksDeferred = async {
-            if (spec != null) {
-                try {
-                    getOrLoadCatalogPool().filter { SmartGenreCatalog.matchesTrack(it, spec) }
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            } else {
+        // Only query the smart catalog pool if direct server genre tags returned fewer than 40 tracks!
+        // This makes large server genres (like Rock) open almost instantaneously on Android TV.
+        val smartPoolTracks = if (spec != null && tracksByTag.size < 40) {
+            try {
+                getOrLoadCatalogPool().filter { SmartGenreCatalog.matchesTrack(it, spec) }
+            } catch (_: Exception) {
                 emptyList()
             }
+        } else {
+            emptyList()
         }
 
-        val smartPoolAlbumsDeferred = async {
-            if (spec != null) {
-                try {
-                    getOrLoadAlbumsPool().filter { SmartGenreCatalog.matchesAlbum(it, spec) }
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            } else {
+        val smartPoolAlbums = if (spec != null && albumsByTag.size < 20) {
+            try {
+                getOrLoadAlbumsPool().filter { SmartGenreCatalog.matchesAlbum(it, spec) }
+            } catch (_: Exception) {
                 emptyList()
             }
+        } else {
+            emptyList()
         }
 
-        var tracks = (tracksByTagDeferred.await() + smartPoolTracksDeferred.await())
+        var tracks = (tracksByTag + smartPoolTracks)
             .distinctBy { it.id }
             .take(maxTracks)
-        var apiAlbums = (albumsByTagDeferred.await() + smartPoolAlbumsDeferred.await())
+        var apiAlbums = (albumsByTag + smartPoolAlbums)
             .distinctBy { it.id }
 
-        // If a custom non-smart genre returned very few tracks from tags, enrich from catalog pool or search
-        if (spec == null && tracks.size < 25) {
+        if (spec == null && tracks.size < 20) {
             try {
                 val normGenre = SmartGenreCatalog.normalize(genre)
                 val rescued = getOrLoadCatalogPool().filter { t ->
@@ -813,7 +842,7 @@ class SubsonicApi(
 
         if (tracks.isEmpty() && apiAlbums.isEmpty()) {
             try {
-                val sr = search(spec?.title ?: genre, artistCount = 30, albumCount = 100, songCount = 500)
+                val sr = search(spec?.title ?: genre, artistCount = 30, albumCount = 80, songCount = 300)
                 tracks = sr.tracks
                 apiAlbums = sr.albums
             } catch (_: Exception) {
@@ -824,16 +853,13 @@ class SubsonicApi(
         // Build complete list of albums / movies / games / sources from both getAlbumList2 and the tracks themselves
         val derivedAlbums = tracks
             .groupBy { t ->
-                val cleanAlb = cleanAlbumName(t.album).trim()
-                val hasValidAlbum = cleanAlb.isNotBlank() &&
-                    !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
-                    !cleanAlb.equals("Neznámy album", ignoreCase = true) &&
-                    !cleanAlb.equals("[Unknown Album]", ignoreCase = true)
+                val cleanAlb = t.album.trim()
+                val hasValidAlbum = cleanAlb.isNotBlank()
                 when {
                     t.albumId.isNotBlank() && hasValidAlbum -> "al:${t.albumId}"
                     hasValidAlbum -> "al_group:$cleanAlb"
                     else -> {
-                        val cleanArt = cleanArtistName(t.artist).trim()
+                        val cleanArt = t.artist.trim()
                             .ifBlank {
                                 if (t.title.contains(" - ")) t.title.substringBefore(" - ").trim() else "Rôzne"
                             }
@@ -843,20 +869,11 @@ class SubsonicApi(
             }
             .map { (groupKey, groupTracks) ->
                 val first = groupTracks.first()
-                val cleanAlb = cleanAlbumName(first.album).trim()
-                val hasValidAlbum = cleanAlb.isNotBlank() &&
-                    !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
-                    !cleanAlb.equals("Neznámy album", ignoreCase = true) &&
-                    !cleanAlb.equals("[Unknown Album]", ignoreCase = true)
-                val displayTitle = if (hasValidAlbum) {
-                    cleanAlb
-                } else {
-                    cleanArtistName(first.artist).trim()
-                        .ifBlank {
-                            if (first.title.contains(" - ")) first.title.substringBefore(" - ").trim() else "Nezaradené"
-                        }
+                val cleanAlb = first.album.trim()
+                val displayTitle = cleanAlb.ifBlank {
+                    first.artist.trim().ifBlank { "Nezaradené" }
                 }
-                val artistSubtitle = cleanArtistName(first.artist).trim()
+                val artistSubtitle = first.artist.trim()
                 val sub = listOf(
                     artistSubtitle.takeIf { !it.equals(displayTitle, ignoreCase = true) }.orEmpty(),
                     if (first.year > 0) first.year.toString() else ""
@@ -1032,6 +1049,7 @@ class SubsonicApi(
         const val CLIENT_NAME = "SoundWave"
 
         private val LOSSLESS_SUFFIXES = setOf("flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff")
+        private val ARTIST_FEAT_SPLIT_REGEX = Regex("(?i)\\s+(feat\\.?|ft\\.?|with|vs\\.?)\\s+|[,;/&]")
 
         /** "192.168.1.5:4533/" -> "http://192.168.1.5:4533". Keeps https:// if the user typed it. */
         fun normalizeUrl(input: String): String {
@@ -1058,6 +1076,13 @@ class SubsonicApi(
         fun tokenFor(password: String, salt: String): String = md5(password + salt)
     }
 }
+
+private data class Quad<A, B, C, D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D
+)
 
 // -------------------------------------------------------------------------------------------------
 // Helpers shared with the UI / ViewModel

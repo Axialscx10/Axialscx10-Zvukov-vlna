@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import com.example.data.formatTrackSubtitle
 import androidx.compose.foundation.shape.CircleShape
@@ -44,15 +45,21 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.foundation.border
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.example.ui.components.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -123,21 +130,29 @@ fun ExploreScreen(
     onServerStatusClick: () -> Unit,
     onTrackMenu: (TrackItem) -> Unit = {}
 ) {
-    val categories = listOf("Všetko", "Power Metal", "Skladby", "Interpreti", "Albumy", "Playlisty", "Žánre")
+    val categories = remember { listOf("Všetko", "Power Metal", "Skladby", "Interpreti", "Albumy", "Playlisty", "Žánre") }
     val content = uiState.exploreContent()
     val query = uiState.searchQuery.trim()
     val isSearching = query.isNotEmpty()
-    val tracks = applyAudiophileFilters(content.tracks, uiState.activeAudiophileFilters)
-    val playlists = if (isSearching) {
-        uiState.libraryPlaylists.filter { it.title.contains(query, ignoreCase = true) }
-    } else uiState.libraryPlaylists
-    val genres = if (isSearching) {
-        uiState.genres.filter { it.name.contains(query, ignoreCase = true) }
-    } else if (uiState.exploreCategory == "Žánre") {
-        uiState.genres
-    } else {
-        uiState.genres.take(36)
+    val tracks = remember(content.tracks, uiState.activeAudiophileFilters) {
+        applyAudiophileFilters(content.tracks, uiState.activeAudiophileFilters)
     }
+    val playlists = remember(isSearching, query, uiState.libraryPlaylists) {
+        if (isSearching) {
+            uiState.libraryPlaylists.filter { it.title.contains(query, ignoreCase = true) }
+        } else uiState.libraryPlaylists
+    }
+    val genres = remember(isSearching, query, uiState.exploreCategory, uiState.genres) {
+        if (isSearching) {
+            uiState.genres.filter { it.name.contains(query, ignoreCase = true) }
+        } else if (uiState.exploreCategory == "Žánre") {
+            uiState.genres
+        } else {
+            uiState.genres.take(36)
+        }
+    }
+    val chunkedAlbums = remember(content.albums) { content.albums.chunked(2) }
+    val distinctArtists = remember(content.artists) { content.artists.distinctBy { it.id } }
 
     fun show(category: String) = uiState.exploreCategory == "Všetko" || uiState.exploreCategory == "Power Metal" || uiState.exploreCategory == category
 
@@ -233,12 +248,21 @@ fun ExploreScreen(
                 }
 
                 // Active Search Bar
+                var isSearchFocused by remember { mutableStateOf(false) }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
                         .clip(RoundedCornerShape(50))
                         .background(SurfaceContainerHigh)
+                        .then(
+                            if (isSearchFocused) {
+                                Modifier.border(3.dp, Color(0xFFFFEA00), RoundedCornerShape(50))
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .onFocusChanged { isSearchFocused = it.hasFocus }
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -564,95 +588,94 @@ fun ExploreScreen(
 
         // Tracks Section
         if (show("Skladby") && tracks.isNotEmpty()) {
-            item {
-                Column(modifier = Modifier.fillMaxWidth()) {
+            item(key = "explore_tracks_header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Text(
+                            text = if (isSearching) "Skladby" else "Náhodný výber",
+                            color = OnSurface,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(SurfaceContainerHigh)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (isSearching) "Skladby" else "Náhodný výber",
-                                color = OnSurface,
-                                fontSize = 16.sp,
+                                text = tracks.size.toString(),
+                                color = OnSurfaceVariant,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(SurfaceContainerHigh)
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = tracks.size.toString(),
-                                    color = OnSurfaceVariant,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
                     }
-
-                    tracks.forEach { track ->
-                        val isLiked = track.id in uiState.likedTrackIds
-                        val isCurrent = uiState.currentTrack.id == track.id
-                        ExploreTrackRow(
-                            track = track,
-                            isPlayingHighlight = isCurrent,
-                            isActuallyPlaying = isCurrent && uiState.isPlaying,
-                            isLiked = isLiked,
-                            onClick = { onTrackClick(track, tracks) },
-                            onLikeClick = { onTrackLikeToggle(track.id) },
-                            onMenuClick = { onTrackMenu(track) }
-                        )
-                    }
                 }
+            }
+            itemsIndexed(
+                items = tracks,
+                key = { idx, track -> "exp_tr_${idx}_${track.id}" }
+            ) { _, track ->
+                val isLiked = track.id in uiState.likedTrackIds
+                val isCurrent = uiState.currentTrack.id == track.id
+                ExploreTrackRow(
+                    track = track,
+                    isPlayingHighlight = isCurrent,
+                    isActuallyPlaying = isCurrent && uiState.isPlaying,
+                    isLiked = isLiked,
+                    onClick = { onTrackClick(track, tracks) },
+                    onLikeClick = { onTrackLikeToggle(track.id) },
+                    onMenuClick = { onTrackMenu(track) }
+                )
             }
         }
 
         // Albums Grid Section
-        if (show("Albumy") && content.albums.isNotEmpty()) {
-            item {
-                Column(
+        if (show("Albumy") && chunkedAlbums.isNotEmpty()) {
+            item(key = "explore_albums_header") {
+                Text(
+                    text = if (isSearching) "Albumy" else "Nové albumy na serveri",
+                    color = OnSurface,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            itemsIndexed(
+                items = chunkedAlbums,
+                key = { idx, rowAlbums -> "exp_al_row_${idx}_${rowAlbums.first().id}" }
+            ) { _, rowAlbums ->
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = if (isSearching) "Albumy" else "Nové albumy na serveri",
-                        color = OnSurface,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    content.albums.chunked(2).forEach { rowAlbums ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            rowAlbums.forEach { album ->
-                                ExploreAlbumGridCard(
-                                    album = album,
-                                    onClick = { onAlbumClick(album) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            if (rowAlbums.size == 1) Spacer(modifier = Modifier.weight(1f))
-                        }
+                    rowAlbums.forEach { album ->
+                        ExploreAlbumGridCard(
+                            album = album,
+                            onClick = { onAlbumClick(album) },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
+                    if (rowAlbums.size == 1) Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }
 
         // Artists shelf
-        if (show("Interpreti") && content.artists.isNotEmpty()) {
-            item {
+        if (show("Interpreti") && distinctArtists.isNotEmpty()) {
+            item(key = "explore_artists_shelf") {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -669,7 +692,7 @@ fun ExploreScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(content.artists, key = { it.id }) { artist ->
+                        items(distinctArtists, key = { it.id }) { artist ->
                             Column(
                                 modifier = Modifier
                                     .width(112.dp)
@@ -715,98 +738,105 @@ fun ExploreScreen(
 
         // Playlists
         if (show("Playlisty") && playlists.isNotEmpty()) {
-            item {
-                Column(
+            item(key = "explore_playlists_header") {
+                Text(
+                    text = "Playlisty",
+                    color = OnSurface,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            itemsIndexed(
+                items = playlists.take(10),
+                key = { idx, pl -> "exp_pl_${idx}_${pl.id}" }
+            ) { _, pl ->
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onPlaylistClick(pl) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "Playlisty",
-                        color = OnSurface,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    playlists.take(12).forEach { pl ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { onPlaylistClick(pl) }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(SurfaceContainerHigh)
-                            ) {
-                                NetImage(
-                                    url = pl.imageUrl,
-                                    contentDescription = pl.title,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = pl.title,
-                                    color = OnSurface,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = pl.trackCount,
-                                    color = OnSurfaceVariant,
-                                    fontSize = 12.sp,
-                                    maxLines = 1
-                                )
-                            }
-                        }
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SurfaceContainerHigh)
+                    ) {
+                        NetImage(
+                            url = pl.imageUrl,
+                            contentDescription = pl.title,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = pl.title,
+                            color = OnSurface,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = pl.trackCount,
+                            color = OnSurfaceVariant,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
                     }
                 }
             }
         }
 
-        // Genres
+        // Genres (rendered in lazy 3-column rows so Android TV only composes 1 row at a time!)
         if (show("Žánre") && genres.isNotEmpty()) {
-            item {
-                Column(
+            item(key = "explore_genres_header") {
+                Text(
+                    text = "Žánre",
+                    color = OnSurface,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            val genreRows = genres.chunked(3)
+            itemsIndexed(
+                items = genreRows,
+                key = { idx, row -> "exp_genre_row_${idx}_${row.first().name}" }
+            ) { _, rowGenres ->
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "Žánre",
-                        color = OnSurface,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        genres.forEach { genre ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(SurfaceContainerHigh)
-                                    .clickable { onGenreClick(genre) }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = "${genre.name} · ${genre.songCount}",
-                                    color = OnSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                    rowGenres.forEach { genre ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(50))
+                                .background(SurfaceContainerHigh)
+                                .clickable { onGenreClick(genre) }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${genre.name} · ${genre.songCount}",
+                                color = OnSurface,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
+                    }
+                    repeat(3 - rowGenres.size) {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }

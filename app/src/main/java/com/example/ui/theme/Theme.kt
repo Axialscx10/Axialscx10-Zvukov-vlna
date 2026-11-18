@@ -76,19 +76,40 @@ private class SoundWaveFocusIndicationNode(
     }
 
     override fun ContentDrawScope.draw() {
-        drawContent()
         val minDim = minOf(size.width, size.height)
         val radiusPx = if (minDim <= 54.dp.toPx()) minDim / 2f else 12.dp.toPx()
         val cornerRadius = CornerRadius(radiusPx, radiusPx)
 
-        if (isPressed) {
+        // 1. Pre-content glow background so transparent rows light up immediately on TV
+        if (isFocused || isHovered) {
             drawRoundRect(
-                color = Color(0xFF00E5FF).copy(alpha = 0.30f),
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFFFFEA00).copy(alpha = 0.24f),
+                        Color(0xFF00E5FF).copy(alpha = 0.22f)
+                    )
+                ),
                 cornerRadius = cornerRadius
             )
-            val strokePx = 3.dp.toPx()
+        } else if (isPressed) {
             drawRoundRect(
-                color = Color(0xFF00E5FF),
+                color = Color(0xFFFFEA00).copy(alpha = 0.32f),
+                cornerRadius = cornerRadius
+            )
+        }
+
+        // 2. Draw component content
+        drawContent()
+
+        // 3. Post-content high-contrast TV focus frame (visible on Dark, AMOLED, Light, and Album Art)
+        if (isPressed) {
+            drawRoundRect(
+                color = Color(0xFFFFEA00).copy(alpha = 0.28f),
+                cornerRadius = cornerRadius
+            )
+            val strokePx = 4.dp.toPx()
+            drawRoundRect(
+                color = Color(0xFFFFEA00),
                 topLeft = Offset(strokePx / 2f, strokePx / 2f),
                 size = Size(
                     (size.width - strokePx).coerceAtLeast(0f),
@@ -98,24 +119,38 @@ private class SoundWaveFocusIndicationNode(
                 style = Stroke(width = strokePx)
             )
         } else if (isFocused || isHovered) {
-            // Vivid neon cyan tint fill so dark cards/rows immediately light up on TV
+            // Top glaze so opaque cards/buttons also visibly brighten when selected
             drawRoundRect(
                 brush = Brush.horizontalGradient(
                     colors = listOf(
-                        Color(0xFF00E5FF).copy(alpha = 0.25f),
-                        Color(0xFFFF5545).copy(alpha = 0.18f)
+                        Color(0xFFFFEA00).copy(alpha = 0.22f),
+                        Color(0xFF00E5FF).copy(alpha = 0.18f)
                     )
                 ),
                 cornerRadius = cornerRadius
             )
-            // Outer 3.5dp high-contrast Neon Cyan + Coral border
-            val outerStroke = 3.5.dp.toPx()
+
+            // Layer A: Outer dark contrast halo (ensures visibility even on white/bright backgrounds)
+            val haloStroke = 6.dp.toPx()
+            drawRoundRect(
+                color = Color.Black.copy(alpha = 0.85f),
+                topLeft = Offset(haloStroke / 2f, haloStroke / 2f),
+                size = Size(
+                    (size.width - haloStroke).coerceAtLeast(0f),
+                    (size.height - haloStroke).coerceAtLeast(0f)
+                ),
+                cornerRadius = cornerRadius,
+                style = Stroke(width = haloStroke)
+            )
+
+            // Layer B: Vivid 4dp Electric Gold (#FFEA00) + Neon Cyan (#00E5FF) main TV frame
+            val outerStroke = 4.dp.toPx()
             drawRoundRect(
                 brush = Brush.linearGradient(
                     colors = listOf(
+                        Color(0xFFFFEA00),
                         Color(0xFF00E5FF),
-                        Color(0xFFFF5545),
-                        Color(0xFF00E5FF)
+                        Color(0xFFFFEA00)
                     )
                 ),
                 topLeft = Offset(outerStroke / 2f, outerStroke / 2f),
@@ -126,12 +161,13 @@ private class SoundWaveFocusIndicationNode(
                 cornerRadius = cornerRadius,
                 style = Stroke(width = outerStroke)
             )
-            // Crisp inner white highlight rim for maximum contrast on both dark and light backgrounds
+
+            // Layer C: Crisp inner pure white highlight rim
             val innerInset = outerStroke + 1.dp.toPx()
-            val innerStroke = 1.dp.toPx()
+            val innerStroke = 1.5.dp.toPx()
             if (size.width > innerInset * 2 && size.height > innerInset * 2) {
                 drawRoundRect(
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = Color.White.copy(alpha = 0.95f),
                     topLeft = Offset(innerInset, innerInset),
                     size = Size(size.width - innerInset * 2, size.height - innerInset * 2),
                     cornerRadius = CornerRadius(
@@ -139,6 +175,20 @@ private class SoundWaveFocusIndicationNode(
                         (radiusPx - innerInset).coerceAtLeast(2f)
                     ),
                     style = Stroke(width = innerStroke)
+                )
+            }
+
+            // Layer D: Left Electric Gold indicator bar on cards/rows/buttons wider than 72dp
+            if (size.width >= 72.dp.toPx() && size.height >= 28.dp.toPx()) {
+                val barW = 6.dp.toPx()
+                val barH = (size.height * 0.58f).coerceAtLeast(14.dp.toPx())
+                val barX = 4.dp.toPx()
+                val barY = (size.height - barH) / 2f
+                drawRoundRect(
+                    color = Color(0xFFFFEA00),
+                    topLeft = Offset(barX, barY),
+                    size = Size(barW, barH),
+                    cornerRadius = CornerRadius(barW / 2f, barW / 2f)
                 )
             }
         }
@@ -230,13 +280,15 @@ fun MyApplicationTheme(
 
     val colorScheme = createColorScheme(activeTokens)
 
-    CompositionLocalProvider(
-        LocalSoundWaveColors provides activeTokens,
-        LocalIndication provides SoundWaveFocusIndication
+    // CRITICAL: CompositionLocalProvider for LocalIndication MUST be INSIDE MaterialTheme,
+    // because MaterialTheme provides its own default ripple() LocalIndication internally!
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography
     ) {
-        MaterialTheme(
-            colorScheme = colorScheme,
-            typography = Typography,
+        CompositionLocalProvider(
+            LocalSoundWaveColors provides activeTokens,
+            LocalIndication provides SoundWaveFocusIndication,
             content = content
         )
     }

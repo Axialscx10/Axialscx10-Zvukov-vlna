@@ -1,5 +1,6 @@
 package com.example.data
 
+import androidx.compose.runtime.Immutable
 import java.util.Locale
 
 /**
@@ -16,6 +17,7 @@ import java.util.Locale
  *  4. Slovak / Czech language & artist recognition for SK & CZ music
  *  5. Release decade classification (70s, 80s, 90s, 2000+)
  */
+@Immutable
 data class SmartGenreSpec(
     val canonicalName: String,
     val aliases: Set<String>,
@@ -585,6 +587,7 @@ object SmartGenreCatalog {
             "pieseň|piesen|skladba|rozprávka|rozpravka|pohádka|pohadka|česk|slovensk|" +
             "jsem|jsi|jsme|nejsem|když|kdyz|lásko|život|svět|slunce|déšť|vítr|píseň)\\b"
     )
+    private val yearRegex = Regex("\\b(19\\d{2}|20\\d{2})\\b")
 
     /**
      * Finds the matching [SmartGenreSpec] for any requested genre string (whether a smart genre
@@ -607,37 +610,37 @@ object SmartGenreCatalog {
 
     /**
      * Checks if a [TrackItem] belongs to [spec] based on artist, album, title, year, or SK/CZ language.
+     * Optimized to avoid redundant regex cleaning inside large catalog loops.
      */
     fun matchesTrack(track: TrackItem, spec: SmartGenreSpec): Boolean {
         if (spec.yearRange != null && track.year in spec.yearRange) {
             return true
         }
-        val artistLower = cleanArtistName(track.artist).lowercase(Locale.ROOT)
-        val rawArtistLower = track.artist.lowercase(Locale.ROOT)
-        val albumLower = cleanAlbumName(track.album).lowercase(Locale.ROOT)
+        val artistLower = track.artist.lowercase(Locale.ROOT)
         val titleLower = track.title.lowercase(Locale.ROOT)
 
-        if (spec.artistKeywords.any { kw ->
-                artistLower == kw ||
-                    artistLower.contains(kw) ||
-                    rawArtistLower.contains(kw) ||
-                    titleLower.startsWith("$kw -") ||
-                    titleLower.contains(" - $kw")
+        if (spec.artistKeywords.isNotEmpty()) {
+            if (artistLower in spec.artistKeywords) return true
+            for (kw in spec.artistKeywords) {
+                if (artistLower.contains(kw) || titleLower.contains(kw)) {
+                    return true
+                }
             }
-        ) {
-            return true
         }
 
-        if (spec.titleOrAlbumKeywords.any { kw ->
-                albumLower.contains(kw) || titleLower.contains(kw)
+        if (spec.titleOrAlbumKeywords.isNotEmpty()) {
+            val albumLower = track.album.lowercase(Locale.ROOT)
+            for (kw in spec.titleOrAlbumKeywords) {
+                if (albumLower.contains(kw) || titleLower.contains(kw)) {
+                    return true
+                }
             }
-        ) {
-            return true
         }
 
         if (spec.matchSkCzLanguage) {
-            val combined = "${track.artist} ${track.album} ${track.title}"
-            if (skCzCharRegex.containsMatchIn(combined) || skCzWordsRegex.containsMatchIn(combined)) {
+            if (skCzCharRegex.containsMatchIn(track.title) ||
+                skCzCharRegex.containsMatchIn(track.artist)
+            ) {
                 return true
             }
         }
@@ -653,20 +656,28 @@ object SmartGenreCatalog {
         val subLower = album.subtitle.lowercase(Locale.ROOT)
 
         if (spec.yearRange != null) {
-            val yearMatch = Regex("\\b(19\\d{2}|20\\d{2})\\b").find(subLower)?.value?.toIntOrNull()
-                ?: Regex("\\b(19\\d{2}|20\\d{2})\\b").find(titleLower)?.value?.toIntOrNull()
+            val yearMatch = yearRegex.find(subLower)?.value?.toIntOrNull()
+                ?: yearRegex.find(titleLower)?.value?.toIntOrNull()
             if (yearMatch != null && yearMatch in spec.yearRange) return true
         }
 
-        if (spec.artistKeywords.any { kw -> subLower.contains(kw) || titleLower.contains(kw) }) {
+        if (spec.artistKeywords.isNotEmpty() && spec.artistKeywords.any { kw ->
+                subLower.contains(kw) || titleLower.contains(kw)
+            }
+        ) {
             return true
         }
-        if (spec.titleOrAlbumKeywords.any { kw -> titleLower.contains(kw) || subLower.contains(kw) }) {
+        if (spec.titleOrAlbumKeywords.isNotEmpty() && spec.titleOrAlbumKeywords.any { kw ->
+                titleLower.contains(kw) || subLower.contains(kw)
+            }
+        ) {
             return true
         }
         if (spec.matchSkCzLanguage) {
-            val combined = "${album.title} ${album.subtitle}"
-            if (skCzCharRegex.containsMatchIn(combined) || skCzWordsRegex.containsMatchIn(combined)) {
+            if (skCzCharRegex.containsMatchIn(album.title) ||
+                skCzCharRegex.containsMatchIn(album.subtitle) ||
+                skCzWordsRegex.containsMatchIn(album.title)
+            ) {
                 return true
             }
         }

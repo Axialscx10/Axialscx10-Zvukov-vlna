@@ -53,6 +53,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class SoundWaveUiState(
     val currentScreen: AppScreen = AppScreen.HOME,
     val backStack: List<AppScreen> = emptyList(),
@@ -134,12 +137,13 @@ data class SoundWaveUiState(
 
     // Equalizer & DSP State
     val eqMasterEnabled: Boolean = true,
-    val preampDb: Float = -5.5f,
+    val preampDb: Float = 0.0f,
     val eqBands: List<Float> = SoundWaveCatalog.headphoneProfiles[0].eqBands,
     val activePresetName: String = "Power Metal / Heavy Metal",
-    val subBassBoostDb: Float = 3.5f,
-    val crossfeedEnabled: Boolean = true,
+    val subBassBoostDb: Float = 2.0f,
+    val crossfeedEnabled: Boolean = false,
     val autoGainEnabled: Boolean = true,
+    val bluetoothVolumeStabilizerEnabled: Boolean = true,
 
     // AutoEQ Headphone Calibration State
     val autoEqSearchQuery: String = "",
@@ -151,14 +155,14 @@ data class SoundWaveUiState(
 
     // Streaming Quality & ffmpeg Server Settings State
     val cellularTranscodingEnabled: Boolean = true,
-    val opusBitrateTarget: String = "256k", // "Auto", "128k", "256k", "320k"
-    val backendCodec: String = "Opus (libopus)",
+    val opusBitrateTarget: String = "320k", // "64k", "128k", "192k", "256k", "320k", "Auto"
+    val backendCodec: String = "FLAC Stream",
     val maxSampleRate: String = "48 kHz",
     val hardwareAccelVaapi: Boolean = true,
     val bitPerfectExclusiveMode: Boolean = true,
-    val replayGainEnabled: Boolean = true,
+    val replayGainEnabled: Boolean = false,
     val replayGainMode: String = "Album Gain (Zachová dynamiku)",
-    val replayGainPreampDb: Float = -2.0f,
+    val replayGainPreampDb: Float = 0.0f,
     val gaplessEnabled: Boolean = true,
     val crossfadeSeconds: Int = 0,
     val cacheSizeText: String = "Počítam veľkosť pamäte…",
@@ -206,6 +210,12 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     private var controller: MediaController? = null
     private val pendingForController = mutableListOf<(MediaController) -> Unit>()
 
+    private var homeJob: Job? = null
+    private var exploreJob: Job? = null
+    private var libraryJob: Job? = null
+    private var detailJob: Job? = null
+    private var exploreLoaded = false
+    private var libraryLoaded = false
     private var searchJob: Job? = null
     private var seekJob: Job? = null
     private var lyricsJob: Job? = null
@@ -219,12 +229,13 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         startProgressLoop()
         refreshCacheSize()
         refreshDownloadedTracks()
-        AudioEffectsManager.setBands(
-            SoundWaveCatalog.eqPresets["Synthwave / Retrowave"]!!,
-            -1.5f
-        )
-        AudioEffectsManager.setSubBassBoost(3.5f)
-        AudioEffectsManager.setMasterEnabled(true)
+        val initial = _uiState.value
+        AudioEffectsManager.setBluetoothVolumeStabilizerEnabled(initial.bluetoothVolumeStabilizerEnabled)
+        AudioEffectsManager.setAutoGainEnabled(initial.autoGainEnabled)
+        AudioEffectsManager.setSpatialEnabled(initial.crossfeedEnabled)
+        AudioEffectsManager.setSubBassBoost(initial.subBassBoostDb)
+        AudioEffectsManager.setBands(initial.eqBands, initial.preampDb)
+        AudioEffectsManager.setMasterEnabled(initial.eqMasterEnabled)
         settings.loadCredentials()?.let { c ->
             api = SubsonicApi(c.url, c.username, c.token, c.salt)
             viewModelScope.launch { verifyAndLoad() }
@@ -243,6 +254,10 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         val restoredDur = if (hasSavedTrack) restoredTrack.durationSec * 1000L else 0L
         val restoredProgress = if (restoredDur > 0L) (lastPos.toFloat() / restoredDur).coerceIn(0f, 1f) else 0f
 
+        val savedPreset = settings.getString(SettingsStore.KEY_EQ_PRESET, "Power Metal / Heavy Metal")
+        val defaultBands = SoundWaveCatalog.eqPresets[savedPreset] ?: SoundWaveCatalog.headphoneProfiles[0].eqBands
+        val savedBands = settings.loadEqBands(defaultBands)
+
         return SoundWaveUiState(
             currentScreen = if (creds == null) AppScreen.SERVER_LOGIN else AppScreen.HOME,
             serverUrl = creds?.url ?: settings.lastServerUrl(),
@@ -251,12 +266,20 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             isServerConnectedSuccess = creds != null,
             serverInfoText = if (creds != null) "Pripájam sa…" else "",
             cellularTranscodingEnabled = settings.getBoolean(SettingsStore.KEY_CELLULAR_TRANSCODING, true),
-            opusBitrateTarget = settings.getString(SettingsStore.KEY_OPUS_BITRATE, "256k"),
-            backendCodec = settings.getString(SettingsStore.KEY_BACKEND_CODEC, "Opus (libopus)"),
+            opusBitrateTarget = settings.getString(SettingsStore.KEY_OPUS_BITRATE, "320k"),
+            backendCodec = settings.getString(SettingsStore.KEY_BACKEND_CODEC, "FLAC Stream"),
             loginTranscodeOption = settings.getString(
                 SettingsStore.KEY_LOGIN_TRANSCODE,
                 "Pôvodná kvalita (Direct Stream)"
             ),
+            eqMasterEnabled = settings.getBoolean(SettingsStore.KEY_EQ_MASTER, true),
+            activePresetName = savedPreset,
+            eqBands = savedBands,
+            preampDb = settings.getFloat(SettingsStore.KEY_EQ_PREAMP, 0.0f),
+            subBassBoostDb = settings.getFloat(SettingsStore.KEY_SUB_BASS, 2.0f),
+            crossfeedEnabled = settings.getBoolean(SettingsStore.KEY_SPATIAL, false),
+            autoGainEnabled = settings.getBoolean(SettingsStore.KEY_AUTO_GAIN, true),
+            bluetoothVolumeStabilizerEnabled = settings.getBoolean(SettingsStore.KEY_BT_STABILIZER, true),
             currentTrack = restoredTrack,
             queue = restoredQueue,
             queueIndex = if (restoredQueue.isNotEmpty()) lastQueueIdx.coerceIn(0, restoredQueue.lastIndex) else -1,
@@ -324,7 +347,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             onError("Najprv sa prihlás k serveru.")
             return viewModelScope.launch { }
         }
-        return viewModelScope.launch {
+        return viewModelScope.launch(Dispatchers.IO) {
             try {
                 block(a)
             } catch (e: CancellationException) {
@@ -370,6 +393,11 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                     isMiniPlayerDismissed = if (screen == AppScreen.NOW_PLAYING) false else state.isMiniPlayerDismissed
                 )
             }
+        }
+        when (screen) {
+            AppScreen.EXPLORE -> if (!exploreLoaded && api != null) loadExplore()
+            AppScreen.LIBRARY -> if (!libraryLoaded && api != null) loadLibrary()
+            else -> {}
         }
     }
 
@@ -424,6 +452,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun verifyAndLoad() {
         val a = api ?: return
+        // Start loading Home screen content immediately in parallel with ping() so TV doesn't wait!
+        loadAll()
         try {
             val t0 = SystemClock.elapsedRealtime()
             val info = a.ping()
@@ -451,7 +481,6 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             }
             showMessage(e.message ?: "Server nedostupný.")
         }
-        loadAll()
     }
 
     private fun describeServer(type: String, version: String, apiVersion: String, openSubsonic: Boolean): String {
@@ -465,9 +494,9 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun loadAll() {
+        exploreLoaded = false
+        libraryLoaded = false
         loadHome()
-        loadLibrary()
-        loadExplore()
     }
 
     fun connectToServer() {
@@ -557,20 +586,21 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------------------------------------------------------------------------------------
 
     fun loadHome() {
+        homeJob?.cancel()
         val genre = _uiState.value.homeFilter.takeIf { it != "Všetko" && it != "All" }
         _uiState.update { it.copy(homeLoading = true, homeError = null) }
-        launchApi(onError = { msg -> _uiState.update { it.copy(homeLoading = false, homeError = msg) } }) { a ->
+        homeJob = launchApi(onError = { msg -> _uiState.update { it.copy(homeLoading = false, homeError = msg) } }) { a ->
             coroutineScope {
-                val picks = async { a.randomSongs(12, genre) }
+                val picks = async { a.randomSongs(10, genre) }
                 val again = async {
-                    if (genre == null) a.albumList("recent", 14) else a.albumList("byGenre", 14, genre = genre)
+                    if (genre == null) a.albumList("recent", 10) else a.albumList("byGenre", 10, genre = genre)
                 }
-                val fresh = async { a.albumList("newest", 14) }
+                val fresh = async { a.albumList("newest", 10) }
                 val genreList = async { safe(emptyList<GenreItem>()) { a.genres() } }
                 val pls = async { safe<List<PlaylistItem>?>(null) { a.playlists() } }
 
                 val pickList = picks.await()
-                val againList = again.await().ifEmpty { safe(emptyList<AlbumItem>()) { a.albumList("random", 14) } }
+                val againList = again.await().ifEmpty { safe(emptyList<AlbumItem>()) { a.albumList("random", 10) } }
                 val freshList = fresh.await()
                 val genresLoaded = genreList.await()
                 val plsLoaded = pls.await()
@@ -596,36 +626,33 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadLibrary() {
+        libraryJob?.cancel()
+        libraryLoaded = true
         _uiState.update { it.copy(libraryLoading = true, libraryError = null) }
-        launchApi(onError = { msg -> _uiState.update { it.copy(libraryLoading = false, libraryError = msg) } }) { a ->
+        libraryJob = launchApi(onError = { msg ->
+            libraryLoaded = false
+            _uiState.update { it.copy(libraryLoading = false, libraryError = msg) }
+        }) { a ->
             coroutineScope {
                 val pls = async { a.playlists() }
                 val artists = async { a.artists() }
                 val fav = async { safe(emptyList<TrackItem>()) { a.starredTracks() } }
                 val scan = async { safe(com.example.data.ScanStatus(false, 0L)) { a.scanStatus() } }
-                val albums = async {
-                    val all = mutableListOf<AlbumItem>()
-                    var offset = 0
-                    while (offset < 4000) {
-                        val page = a.albumList("alphabeticalByName", 500, offset)
-                        all += page
-                        if (page.size < 500) break
-                        offset += 500
-                    }
-                    all.toList()
-                }
+                val firstAlbums = async { safe(emptyList<AlbumItem>()) { a.albumList("alphabeticalByName", 150, 0) } }
+
                 val plsLoaded = pls.await()
                 val artistsLoaded = artists.await()
                 val favLoaded = fav.await()
-                val albumsLoaded = albums.await()
+                val firstAlbumsLoaded = firstAlbums.await()
                 val scanStatus = scan.await()
+
                 _uiState.update {
                     it.copy(
                         libraryLoading = false,
                         libraryError = null,
                         libraryPlaylists = plsLoaded,
                         libraryArtists = artistsLoaded,
-                        libraryAlbums = albumsLoaded,
+                        libraryAlbums = firstAlbumsLoaded,
                         favoriteTracks = favLoaded,
                         serverSongCount = if (scanStatus.count > 0L) scanStatus.count else it.serverSongCount
                     )
@@ -636,10 +663,15 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadExplore() {
-        launchApi(onError = { msg -> _uiState.update { it.copy(exploreError = msg) } }) { a ->
+        exploreJob?.cancel()
+        exploreLoaded = true
+        exploreJob = launchApi(onError = { msg ->
+            exploreLoaded = false
+            _uiState.update { it.copy(exploreError = msg) }
+        }) { a ->
             coroutineScope {
-                val tracks = async { a.randomSongs(30) }
-                val albums = async { a.albumList("newest", 12) }
+                val tracks = async { a.randomSongs(20) }
+                val albums = async { a.albumList("newest", 10) }
                 val artists = async { safe(emptyList<ArtistItem>()) { a.artists() } }
                 val genreList = async { safe(emptyList<GenreItem>()) { a.genres() } }
                 val t = tracks.await()
@@ -659,6 +691,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openCollection(id: String, fallbackName: String = "") {
+        detailJob?.cancel()
         val kind = when {
             id.startsWith("pl:") -> "Playlist"
             id.startsWith("al:") || id.startsWith("al_name:") -> "Album"
@@ -688,7 +721,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 showScreenSwitcherSheet = false
             )
         }
-        launchApi(onError = { msg ->
+        detailJob = launchApi(onError = { msg ->
             _uiState.update { st ->
                 st.copy(detail = st.detail?.copy(isLoading = false, title = "Nepodarilo sa načítať", error = msg))
             }
@@ -779,16 +812,17 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 if (c.mediaItemCount > 0) {
                     syncFromController(c)
                 } else {
-                    // Controller is empty (e.g. freshly started after phone restart).
-                    // Restore the saved queue and position into ExoPlayer so user can resume immediately!
+                    // Controller is empty (e.g. freshly started after phone/TV restart).
+                    // Restore saved queue into ExoPlayer WITHOUT calling c.prepare() on startup so
+                    // ExoPlayer does not immediately download a huge FLAC file while Home is loading!
                     val state = _uiState.value
                     if (state.currentTrack.id.isNotBlank() && state.queue.isNotEmpty()) {
                         val profile = currentStreamProfile()
-                        val items = state.queue.map { mediaItemFor(api, it, profile) }
+                        val safeQueue = state.queue.take(60)
+                        val items = safeQueue.map { mediaItemFor(api, it, profile) }
                         val idx = state.queueIndex.coerceIn(0, items.lastIndex)
                         val pos = state.positionMs
                         c.setMediaItems(items, idx, pos)
-                        c.prepare()
                         c.pause()
                     }
                 }
@@ -884,14 +918,13 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             ?: trackFromMediaItem(item)
         scrobbled = false
         if (track.id.isNotBlank()) {
-            settings.addTrackToHistory(track)
-            val hist = settings.loadHistory()
-            settings.savePlaybackState(track, 0L, _uiState.value.queue, idx)
+            val currentQueue = _uiState.value.queue
             _uiState.update {
+                val updatedHistory = (listOf(track) + it.historyTracks.filterNot { h -> h.id == track.id }).take(30)
                 it.copy(
                     currentTrack = track,
                     queueIndex = idx,
-                    historyTracks = hist,
+                    historyTracks = updatedHistory,
                     playbackProgress = 0f,
                     positionMs = 0L,
                     durationMs = track.durationSec * 1000L,
@@ -899,6 +932,10 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                     activeLyricIndex = -1,
                     relatedTracks = emptyList()
                 )
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                settings.addTrackToHistory(track)
+                settings.savePlaybackState(track, 0L, currentQueue, idx)
             }
             launchApi(onError = { }) { it.scrobble(track.id, submission = false) }
         } else {
@@ -925,28 +962,35 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             while (isActive) {
                 val c = controller
                 val isPlaying = c?.isPlaying == true
-                // Battery Optimization: When paused or idle, sleep longer (1200ms) to reduce CPU wakeups.
-                // When actively playing audio, tick every 500ms for smooth progress bar and lyrics sync.
-                delay(if (isPlaying) 500L else 1200L)
+                val onNowPlaying = _uiState.value.currentScreen == AppScreen.NOW_PLAYING
+                // On TV/Mobile browsing screens (Home, Explore, Library, Detail), only tick every 2000ms
+                // so D-pad scrolling and list loading never stutter from 500ms state updates!
+                val sleepMs = when {
+                    !isPlaying -> 1500L
+                    onNowPlaying -> 500L
+                    else -> 2000L
+                }
+                delay(sleepMs)
                 if (c == null || c.mediaItemCount == 0 || !isPlaying) continue
                 val s = _uiState.value
                 if (s.isSeeking) continue
                 val pos = c.currentPosition
                 val dur = if (c.duration != C.TIME_UNSET && c.duration > 0) c.duration else s.currentTrack.durationSec * 1000L
                 val progress = if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f
-                _uiState.update {
-                    it.copy(
-                        positionMs = pos,
-                        durationMs = dur,
-                        playbackProgress = progress,
-                        activeLyricIndex = lyricIndexAt(it.lyrics, pos)
-                    )
+                if (onNowPlaying || kotlin.math.abs(progress - s.playbackProgress) >= 0.008f) {
+                    _uiState.update {
+                        it.copy(
+                            positionMs = pos,
+                            durationMs = dur,
+                            playbackProgress = progress,
+                            activeLyricIndex = if (onNowPlaying) lyricIndexAt(it.lyrics, pos) else it.activeLyricIndex
+                        )
+                    }
                 }
                 maybeScrobble(s.currentTrack, pos, dur)
 
-                // Periodically persist playback position every ~5 seconds (10 ticks) so reboot preserves exact spot
                 loopTicks++
-                if (loopTicks % 10 == 0) {
+                if (loopTicks % 6 == 0) {
                     settings.savePositionOnly(pos)
                 }
             }
@@ -1003,41 +1047,94 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             !caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
-    /** Which codec / bitrate to request from the server, based on the network and the user's settings. */
+    /**
+     * Determines the exact format and bitrate to request from the Navidrome/Subsonic server.
+     * Works consistently on Wi-Fi, Ethernet (TV), and Mobile Data!
+     */
     private fun currentStreamProfile(): StreamProfile {
         val s = _uiState.value
-        if (isOnCellular() && s.cellularTranscodingEnabled) {
-            val rate = when (s.opusBitrateTarget) {
-                "128k" -> 128
-                "256k" -> 256
-                "320k" -> 320
-                else -> 192
-            }
-            return when (s.backendCodec) {
-                "FLAC Stream" -> StreamProfile("flac", null, "Mobilné dáta • FLAC")
-                "MP3 (LAME)" -> StreamProfile("mp3", minOf(rate, 320), "Mobilné dáta • MP3 ${minOf(rate, 320)} kbps")
-                "Ogg Vorbis" -> StreamProfile("ogg", rate, "Mobilné dáta • Ogg Vorbis $rate kbps")
-                else -> StreamProfile("opus", rate, "Mobilné dáta • Opus $rate kbps")
-            }
+        val rate = when (s.opusBitrateTarget) {
+            "64k" -> 64
+            "128k" -> 128
+            "192k" -> 192
+            "256k" -> 256
+            "320k" -> 320
+            else -> 192
         }
+
+        // 1. If user explicitly selected a transcoding codec (MP3, Opus, Ogg Vorbis), apply it everywhere (Wi-Fi, TV, Mobile)
+        when (s.backendCodec) {
+            "MP3 (LAME)" -> return StreamProfile("mp3", minOf(rate, 320), "Prekódovanie • MP3 ${minOf(rate, 320)} kbps")
+            "Opus (libopus)" -> return StreamProfile("opus", rate, "Prekódovanie • Opus $rate kbps")
+            "Ogg Vorbis" -> return StreamProfile("ogg", rate, "Prekódovanie • Ogg Vorbis $rate kbps")
+        }
+
+        // 2. If user is on "FLAC Stream" (Originál bez kompresie), check if Mobile Data Saver should kick in on cellular
+        if (isOnCellular() && s.cellularTranscodingEnabled) {
+            val mobileRate = minOf(rate, 192)
+            return StreamProfile("mp3", mobileRate, "Úspora mobilných dát • MP3 $mobileRate kbps")
+        }
+
+        // 3. Otherwise check if loginTranscodeOption was explicitly set to a compressed mode
         return when (s.loginTranscodeOption) {
-            "Vysoká (MP3 320 kbps)" -> StreamProfile("mp3", 320, "Wi‑Fi • MP3 320 kbps")
-            "Mobilné dáta (Opus 192 kbps)" -> StreamProfile("opus", 192, "Wi‑Fi • Opus 192 kbps")
-            "Úspora dát (Opus 128 kbps)" -> StreamProfile("opus", 128, "Wi‑Fi • Opus 128 kbps")
-            else -> StreamProfile("raw", null, "Pôvodná kvalita (bez prekódovania)")
+            "Vysoká (MP3 320 kbps)" -> StreamProfile("mp3", 320, "Prekódovanie • MP3 320 kbps")
+            "Mobilné dáta (Opus 192 kbps)" -> StreamProfile("opus", 192, "Prekódovanie • Opus 192 kbps")
+            "Úspora dát (Opus 128 kbps)" -> StreamProfile("opus", 128, "Prekódovanie • Opus 128 kbps")
+            else -> StreamProfile("raw", null, "Originál bez kompresie (Direct Play)")
+        }
+    }
+
+    /**
+     * Immediately reloads the currently playing track & queue with the newly selected streaming quality
+     * while preserving the exact playback position.
+     */
+    private fun reloadActiveStreamForQualityChange() {
+        val a = api ?: return
+        val s = _uiState.value
+        val profile = currentStreamProfile()
+        if (s.queue.isEmpty()) {
+            showMessage("Nastavená kvalita: ${profile.label}")
+            return
+        }
+        withController { c ->
+            if (c.mediaItemCount == 0) {
+                showMessage("Nastavená kvalita: ${profile.label}")
+                return@withController
+            }
+            val safeQueue = s.queue.take(350)
+            val idx = c.currentMediaItemIndex.coerceIn(0, safeQueue.lastIndex)
+            val pos = c.currentPosition.coerceAtLeast(0L)
+            val wasPlaying = c.isPlaying
+            val items = safeQueue.map { mediaItemFor(a, it, profile) }
+            c.setMediaItems(items, idx, pos)
+            c.prepare()
+            if (wasPlaying) {
+                c.play()
+            }
+            showMessage("Prehrávanie prepnuté na: ${profile.label}")
         }
     }
 
     private fun mediaItemFor(a: SubsonicApi?, t: TrackItem, profile: StreamProfile): MediaItem {
+        val activeBadge = when (profile.format) {
+            "mp3" -> "MP3 ${profile.maxBitRate ?: 320}K"
+            "opus" -> "OPUS ${profile.maxBitRate ?: 192}K"
+            "ogg" -> "OGG ${profile.maxBitRate ?: 192}K"
+            else -> t.badge
+        }
+        val activeTechLine = when (profile.format) {
+            "mp3", "opus", "ogg" -> "${profile.label} (Zdroj: ${t.techLine.ifBlank { t.suffix.uppercase() }})"
+            else -> if (t.techLine.isNotBlank()) "${t.techLine} • Originál" else profile.label
+        }
         val extras = Bundle().apply {
-            putString("badge", t.badge)
-            putString("techLine", t.techLine)
+            putString("badge", activeBadge)
+            putString("techLine", activeTechLine)
             putString("albumId", t.albumId)
             putString("artistId", t.artistId)
             putString("coverArtId", t.coverArtId)
             putString("suffix", t.suffix)
             putInt("durationSec", t.durationSec)
-            putBoolean("hiRes", t.isHiResBadgeCyan)
+            putBoolean("hiRes", profile.format == "raw" && t.isHiResBadgeCyan)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(t.title)
@@ -1047,7 +1144,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             .setExtras(extras)
             .build()
 
-        val localPath = offlineManager.getLocalFileUri(t.id)
+        val isDownloaded = t.id in _uiState.value.downloadedTrackIds
+        val localPath = if (isDownloaded && profile.format == "raw") offlineManager.getLocalFileUri(t.id) else null
         val uri = if (localPath != null) {
             Uri.fromFile(File(localPath))
         } else if (a != null) {
@@ -1087,28 +1185,27 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startQueue(list: List<TrackItem>, startIndex: Int, from: String, shuffle: Boolean?) {
         val a = api
-        val isOfflinePlayback = list.all { offlineManager.isDownloaded(it.id) }
+        val downloadedIds = _uiState.value.downloadedTrackIds
+        val isOfflinePlayback = list.all { it.id in downloadedIds }
         if (a == null && !isOfflinePlayback) {
             showMessage("Najprv sa prihlás k serveru alebo prehraj stiahnuté skladby.")
             return
         }
         if (list.isEmpty() || startIndex !in list.indices) return
-        // Allow large genre/library queues (up to 2500 tracks).
-        val window = list.drop(startIndex).take(2500)
+        // Cap queue sent over Binder IPC to 100 tracks to keep Android TV IPC & memory instant
+        val window = list.drop(startIndex).take(100)
         val profile = currentStreamProfile()
         val items = window.map { mediaItemFor(a, it, profile) }
         scrobbled = false
         relatedLoadedFor = ""
         val track = window[0]
-        settings.addTrackToHistory(track)
-        val hist = settings.loadHistory()
-        settings.savePlaybackState(track, 0L, window, 0)
         _uiState.update {
+            val updatedHistory = (listOf(track) + it.historyTracks.filterNot { h -> h.id == track.id }).take(30)
             it.copy(
                 queue = window,
                 queueIndex = 0,
                 currentTrack = track,
-                historyTracks = hist,
+                historyTracks = updatedHistory,
                 playingFrom = from,
                 isPlaying = true,
                 isMiniPlayerDismissed = false,
@@ -1119,6 +1216,10 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 activeLyricIndex = -1,
                 relatedTracks = emptyList()
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            settings.addTrackToHistory(track)
+            settings.savePlaybackState(track, 0L, window, 0)
         }
         withController { c ->
             if (shuffle != null) c.shuffleModeEnabled = shuffle
@@ -1367,12 +1468,14 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------------------------------------------------------------------------------------
 
     fun toggleEqMaster(enabled: Boolean) {
+        settings.putBoolean(SettingsStore.KEY_EQ_MASTER, enabled)
         _uiState.update { it.copy(eqMasterEnabled = enabled) }
         AudioEffectsManager.setMasterEnabled(enabled)
     }
 
     fun setPreampDb(value: Float) {
         val rounded = (Math.round(value * 2f) / 2f).coerceIn(-12f, 12f)
+        settings.putFloat(SettingsStore.KEY_EQ_PREAMP, rounded)
         _uiState.update { it.copy(preampDb = rounded) }
         AudioEffectsManager.setBands(_uiState.value.eqBands, rounded)
     }
@@ -1384,6 +1487,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
             if (index in updated.indices) {
                 updated[index] = rounded
             }
+            settings.saveEqBands(updated)
+            settings.putString(SettingsStore.KEY_EQ_PRESET, "Vlastný (Custom)")
             state.copy(eqBands = updated, activePresetName = "Vlastný (Custom)")
         }
         AudioEffectsManager.setBands(_uiState.value.eqBands, _uiState.value.preampDb)
@@ -1391,17 +1496,23 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetEqFlat() {
         val flat = List(10) { 0f }
+        settings.saveEqBands(flat)
+        settings.putString(SettingsStore.KEY_EQ_PRESET, "Audiofil Flat (Referenčný)")
+        settings.putFloat(SettingsStore.KEY_EQ_PREAMP, 0.0f)
         _uiState.update {
             it.copy(
                 eqBands = flat,
+                preampDb = 0.0f,
                 activePresetName = "Audiofil Flat (Referenčný)"
             )
         }
-        AudioEffectsManager.setBands(flat, _uiState.value.preampDb)
+        AudioEffectsManager.setBands(flat, 0.0f)
     }
 
     fun invertEqBands() {
         val inverted = _uiState.value.eqBands.map { (-it).coerceIn(-12f, 12f) }
+        settings.saveEqBands(inverted)
+        settings.putString(SettingsStore.KEY_EQ_PRESET, "Invertovaný")
         _uiState.update { state ->
             state.copy(
                 eqBands = inverted,
@@ -1413,6 +1524,8 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectEqPreset(presetName: String) {
         val values = SoundWaveCatalog.eqPresets[presetName] ?: return
+        settings.saveEqBands(values)
+        settings.putString(SettingsStore.KEY_EQ_PRESET, presetName)
         _uiState.update {
             it.copy(
                 eqBands = values,
@@ -1424,16 +1537,36 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSubBassBoostDb(value: Float) {
         val rounded = (Math.round(value * 2f) / 2f).coerceIn(0f, 10f)
+        settings.putFloat(SettingsStore.KEY_SUB_BASS, rounded)
         _uiState.update { it.copy(subBassBoostDb = rounded) }
         AudioEffectsManager.setSubBassBoost(rounded)
     }
 
     fun toggleCrossfeed(enabled: Boolean) {
+        settings.putBoolean(SettingsStore.KEY_SPATIAL, enabled)
         _uiState.update { it.copy(crossfeedEnabled = enabled) }
+        AudioEffectsManager.setSpatialEnabled(enabled)
+        showMessage(if (enabled) "Priestorový 3D zvuk (Virtualizer) zapnutý." else "Priestorový 3D zvuk vypnutý.")
     }
 
     fun toggleAutoGain(enabled: Boolean) {
+        settings.putBoolean(SettingsStore.KEY_AUTO_GAIN, enabled)
         _uiState.update { it.copy(autoGainEnabled = enabled) }
+        AudioEffectsManager.setAutoGainEnabled(enabled)
+        showMessage(if (enabled) "Ochrana proti chrčaniu (Auto-Gain) zapnutá." else "Ochrana proti chrčaniu vypnutá.")
+    }
+
+    fun toggleBluetoothVolumeStabilizer(enabled: Boolean) {
+        settings.putBoolean(SettingsStore.KEY_BT_STABILIZER, enabled)
+        _uiState.update { it.copy(bluetoothVolumeStabilizerEnabled = enabled) }
+        AudioEffectsManager.setBluetoothVolumeStabilizerEnabled(enabled)
+        showMessage(
+            if (enabled) {
+                "Stabilizácia hlasitosti (Auto / Bluetooth) zapnutá – zakázané kolísanie a stlmovanie zvuku."
+            } else {
+                "Stabilizácia hlasitosti (Auto / Bluetooth) vypnutá."
+            }
+        )
     }
 
     // AutoEQ Modal
@@ -1715,16 +1848,37 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
         val next = !_uiState.value.cellularTranscodingEnabled
         settings.putBoolean(SettingsStore.KEY_CELLULAR_TRANSCODING, next)
         _uiState.update { it.copy(cellularTranscodingEnabled = next) }
+        reloadActiveStreamForQualityChange()
     }
 
     fun setOpusBitrateTarget(target: String) {
         settings.putString(SettingsStore.KEY_OPUS_BITRATE, target)
-        _uiState.update { it.copy(opusBitrateTarget = target) }
+        // If user was on "FLAC Stream" (Originál) and tapped a specific kbps bitrate button,
+        // automatically switch codec to MP3 (LAME) so the chosen bitrate takes effect immediately!
+        val currentCodec = _uiState.value.backendCodec
+        val nextCodec = if (currentCodec == "FLAC Stream" && target != "Originál") "MP3 (LAME)" else currentCodec
+        if (nextCodec != currentCodec) {
+            settings.putString(SettingsStore.KEY_BACKEND_CODEC, nextCodec)
+        }
+        _uiState.update { it.copy(opusBitrateTarget = target, backendCodec = nextCodec) }
+        reloadActiveStreamForQualityChange()
     }
 
     fun setBackendCodec(codec: String) {
         settings.putString(SettingsStore.KEY_BACKEND_CODEC, codec)
-        _uiState.update { it.copy(backendCodec = codec) }
+        // Reset loginTranscodeOption override if user picks a codec directly
+        if (codec == "FLAC Stream") {
+            settings.putString(SettingsStore.KEY_LOGIN_TRANSCODE, "Pôvodná kvalita (Direct Stream)")
+            _uiState.update {
+                it.copy(
+                    backendCodec = codec,
+                    loginTranscodeOption = "Pôvodná kvalita (Direct Stream)"
+                )
+            }
+        } else {
+            _uiState.update { it.copy(backendCodec = codec) }
+        }
+        reloadActiveStreamForQualityChange()
     }
 
     fun cycleMaxSampleRate() {
@@ -1738,11 +1892,18 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleBitPerfectExclusive() {
-        _uiState.update { it.copy(bitPerfectExclusiveMode = !it.bitPerfectExclusiveMode) }
+        val next = !_uiState.value.bitPerfectExclusiveMode
+        _uiState.update { it.copy(bitPerfectExclusiveMode = next) }
+        if (next) {
+            setBackendCodec("FLAC Stream")
+        }
     }
 
     fun toggleReplayGain() {
-        _uiState.update { it.copy(replayGainEnabled = !it.replayGainEnabled) }
+        val next = !_uiState.value.replayGainEnabled
+        _uiState.update { it.copy(replayGainEnabled = next) }
+        AudioEffectsManager.setReplayGain(next, _uiState.value.replayGainPreampDb)
+        showMessage(if (next) "Vyrovnávanie hlasitosti (ReplayGain) zapnuté." else "Vyrovnávanie hlasitosti vypnuté.")
     }
 
     fun setReplayGainMode(mode: String) {
@@ -1752,6 +1913,7 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
     fun setReplayGainPreamp(db: Float) {
         val rounded = (Math.round(db * 2f) / 2f).coerceIn(-6f, 6f)
         _uiState.update { it.copy(replayGainPreampDb = rounded) }
+        AudioEffectsManager.setReplayGain(_uiState.value.replayGainEnabled, rounded)
     }
 
     fun toggleGapless() {
@@ -1805,13 +1967,25 @@ class SoundWaveViewModel(app: Application) : AndroidViewModel(app) {
                 ?: s.homeQuickPicks.firstOrNull()
                 ?: a.randomSongs(1).firstOrNull()
 
-            val text = StringBuilder("Latencia servera: $avg ms")
+            val text = StringBuilder("✓ Odozva Navidrome servera: $avg ms")
             if (sample != null) {
                 val probe = a.probeStream(a.streamUrl(sample.id, profile.format, profile.maxBitRate))
                 val kbps = if (probe.totalMs > 0) probe.bytes * 8L / probe.totalMs else 0L
-                text.append("\nProfil: ${profile.label}")
-                text.append("\nFormát odpovede: ${probe.contentType.ifBlank { "neznámy" }}")
-                text.append("\nPrvý bajt za ${probe.firstByteMs} ms • ${probe.bytes / 1024} kB za ${probe.totalMs} ms (~$kbps kbps)")
+                val sourceFormat = sample.suffix.uppercase(Locale.ROOT).ifBlank { "NEZNÁMY" }
+                val respType = probe.contentType.lowercase(Locale.ROOT).ifBlank { "neznámy" }
+
+                text.append("\n• Testovaná skladba: „${sample.title}“")
+                text.append("\n• Pôvodný súbor na serveri: $sourceFormat (${sample.techLine.ifBlank { "štandard" }})")
+                text.append("\n• Zvolený režim v aplikácii: ${profile.label}")
+                text.append("\n• Skutočná odpoveď servera: $respType (~$kbps kbps, prvý bajt za ${probe.firstByteMs} ms)")
+
+                if (sourceFormat == "MP3" && profile.format == "raw") {
+                    text.append("\n\nℹ️ Poznámka: Táto skladba je už na tvojom serveri uložená ako MP3. Prepnutie na FLAC nemôže zvýšiť kvalitu súboru, ktorý bol uložený ako MP3.")
+                } else if (profile.format != null && profile.format != "raw" && (respType.contains("flac") || (sourceFormat == "FLAC" && !respType.contains(profile.format) && !respType.contains("mpeg") && !respType.contains("ogg")))) {
+                    text.append("\n\n⚠️ Navidrome poslal pôvodný súbor bez prekódovania! Ak chceš na serveri povoliť prekódovanie do MP3/Opus, otvor Navidrome cez web -> Prehrávače (Players) -> pri „SoundWave“ zapni Prekódovanie (Transcoding).")
+                } else {
+                    text.append("\n\n✓ Streamovanie a kvalita fungujú správne!")
+                }
             } else {
                 text.append("\nKnižnica je prázdna, test streamu preskočený.")
             }

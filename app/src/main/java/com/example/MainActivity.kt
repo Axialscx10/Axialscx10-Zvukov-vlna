@@ -27,11 +27,14 @@ import androidx.compose.runtime.getValue
 import android.view.KeyEvent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import com.example.data.AppScreen
 import com.example.data.formatTrackSubtitle
 import com.example.ui.SoundWaveViewModel
@@ -93,6 +96,22 @@ fun SoundWaveApp(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val isTv = remember(context) { isTelevision(context) }
+    val contentFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(
+        isTv,
+        uiState.currentScreen,
+        uiState.detail?.id
+    ) {
+        if (isTv) {
+            delay(100)
+            try {
+                contentFocusRequester.requestFocus()
+            } catch (_: Throwable) {
+                // Ignore if focusable node is not attached yet
+            }
+        }
+    }
 
     // Android 13+ needs a runtime permission for the playback notification on phones & tablets.
     // On Android TV / Google TV, notifications are not supported and requesting POST_NOTIFICATIONS
@@ -240,11 +259,14 @@ fun SoundWaveApp(
                 }
             }
 
-            // Main Content Area
-            Box(modifier = Modifier.weight(1f)) {
-                Crossfade(targetState = uiState.currentScreen, label = "screen_crossfade") { screen ->
-                    when (screen) {
-                        AppScreen.HOME -> {
+            // Main Content Area (direct rendering without Crossfade offscreen layer overhead or focus trapping on TV)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(contentFocusRequester)
+            ) {
+                when (val screen = uiState.currentScreen) {
+                    AppScreen.HOME -> {
                             HomeScreen(
                                 uiState = uiState,
                                 onFilterSelected = { viewModel.setHomeFilter(it) },
@@ -410,7 +432,8 @@ fun SoundWaveApp(
                                 onCalibrationDryWetChange = { viewModel.setCalibrationDryWet(it) },
                                 onToggleAutoPreamp = { viewModel.toggleAutoPreamp(it) },
                                 onToggleSubBassCompensation = { viewModel.toggleSubBassCompensation(it) },
-                                onApplyAutoEqToDsp = { viewModel.applyAutoEqProfileToDsp() }
+                                onApplyAutoEqToDsp = { viewModel.applyAutoEqProfileToDsp() },
+                                onToggleBluetoothStabilizer = { viewModel.toggleBluetoothVolumeStabilizer(it) }
                             )
                         }
                         AppScreen.UPGRADE_STREAMING -> {
@@ -456,7 +479,6 @@ fun SoundWaveApp(
                             )
                         }
                     }
-                }
             }
         }
 

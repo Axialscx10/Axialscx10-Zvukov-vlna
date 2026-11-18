@@ -71,7 +71,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -80,6 +79,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,7 +95,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.AppScreen
 import com.example.data.SleepTimerOption
@@ -123,6 +123,53 @@ import com.example.ui.theme.SurfaceContainerLowest
 import com.example.ui.theme.TertiaryContainer
 
 @Composable
+fun IconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+private object SoundWaveImageLoader {
+    @Volatile
+    private var instance: coil.ImageLoader? = null
+
+    fun get(context: android.content.Context): coil.ImageLoader {
+        instance?.let { return it }
+        return synchronized(this) {
+            instance ?: run {
+                val dispatcher = okhttp3.Dispatcher().apply {
+                    maxRequests = 10
+                    maxRequestsPerHost = 4
+                }
+                val okHttp = okhttp3.OkHttpClient.Builder()
+                    .dispatcher(dispatcher)
+                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                coil.ImageLoader.Builder(context.applicationContext)
+                    .okHttpClient(okHttp)
+                    .bitmapConfig(android.graphics.Bitmap.Config.RGB_565)
+                    .crossfade(false)
+                    .allowHardware(true)
+                    .respectCacheHeaders(false)
+                    .build()
+                    .also { instance = it }
+            }
+        }
+    }
+}
+
+@Composable
 fun NetImage(
     url: String,
     contentDescription: String?,
@@ -130,22 +177,30 @@ fun NetImage(
     contentScale: ContentScale = ContentScale.Crop,
     alignment: Alignment = Alignment.Center
 ) {
+    if (url.isBlank()) {
+        SynthwaveFallbackArt(modifier = modifier)
+        return
+    }
     val context = LocalContext.current
-    SubcomposeAsyncImage(
-        model = ImageRequest.Builder(context)
+    val imageLoader = remember(context) { SoundWaveImageLoader.get(context) }
+    val request = remember(url, context) {
+        ImageRequest.Builder(context)
             .data(url)
-            .crossfade(true)
-            .build(),
+            .size(192)
+            .precision(coil.size.Precision.INEXACT)
+            .bitmapConfig(android.graphics.Bitmap.Config.RGB_565)
+            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+            .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+            .crossfade(false)
+            .build()
+    }
+    AsyncImage(
+        model = request,
+        imageLoader = imageLoader,
         contentDescription = contentDescription,
         contentScale = contentScale,
         alignment = alignment,
-        modifier = modifier,
-        loading = {
-            SynthwaveFallbackArt()
-        },
-        error = {
-            SynthwaveFallbackArt()
-        }
+        modifier = modifier.background(Color(0xFF1A1624))
     )
 }
 
@@ -186,7 +241,9 @@ fun AnimatedEqualizerBars(
     barWidth: Dp = 3.dp,
     maxHeight: Dp = 16.dp
 ) {
-    if (isAnimating) {
+    val context = LocalContext.current
+    val isTv = remember(context) { com.example.isTelevision(context) }
+    if (isAnimating && !isTv) {
         val infiniteTransition = rememberInfiniteTransition(label = "eq_bars")
         val bar1 by infiniteTransition.animateFloat(
             initialValue = 0.35f,
@@ -648,7 +705,9 @@ fun GlassMiniPlayerDock(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = if (onOpenArtistClick != null) {
-                            Modifier.clickable { onOpenArtistClick() }
+                            Modifier
+                                .focusProperties { canFocus = false }
+                                .clickable { onOpenArtistClick() }
                         } else {
                             Modifier
                         }

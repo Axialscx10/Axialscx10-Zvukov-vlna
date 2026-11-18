@@ -138,12 +138,15 @@ class SettingsStore(context: Context) {
     fun savePlaybackState(track: TrackItem, positionMs: Long, queue: List<TrackItem>, queueIndex: Int) {
         if (track.id.isBlank()) return
         val queueArray = JSONArray()
-        queue.take(150).forEach { queueArray.put(trackToJson(it)) }
+        val windowStart = (queueIndex - 10).coerceAtLeast(0)
+        val savedSlice = if (queue.size > 60) queue.drop(windowStart).take(60) else queue
+        val savedIndex = if (queue.size > 60) (queueIndex - windowStart).coerceIn(0, (savedSlice.size - 1).coerceAtLeast(0)) else queueIndex
+        savedSlice.forEach { queueArray.put(trackToJson(it)) }
         prefs.edit()
             .putString(KEY_LAST_TRACK, trackToJson(track).toString())
             .putLong(KEY_LAST_POSITION_MS, positionMs)
             .putString(KEY_LAST_QUEUE, queueArray.toString())
-            .putInt(KEY_LAST_QUEUE_INDEX, queueIndex)
+            .putInt(KEY_LAST_QUEUE_INDEX, savedIndex)
             .apply()
     }
 
@@ -209,6 +212,30 @@ class SettingsStore(context: Context) {
         prefs.edit().remove(KEY_HISTORY).apply()
     }
 
+    fun loadEqBands(defaultBands: List<Float>): List<Float> {
+        val raw = prefs.getString(KEY_EQ_BANDS, null) ?: return defaultBands
+        return try {
+            val parts = raw.split(",")
+            if (parts.size == 10) {
+                parts.map { it.toFloatOrNull()?.coerceIn(-12f, 12f) ?: 0f }
+            } else {
+                defaultBands
+            }
+        } catch (_: Exception) {
+            defaultBands
+        }
+    }
+
+    fun saveEqBands(bands: List<Float>) {
+        prefs.edit().putString(KEY_EQ_BANDS, bands.joinToString(",")).apply()
+    }
+
+    fun getFloat(key: String, default: Float): Float = prefs.getFloat(key, default)
+
+    fun putFloat(key: String, value: Float) {
+        prefs.edit().putFloat(key, value).apply()
+    }
+
     companion object {
         private const val KEY_URL = "server_url"
         private const val KEY_USER = "username"
@@ -219,6 +246,15 @@ class SettingsStore(context: Context) {
         const val KEY_OPUS_BITRATE = "opus_bitrate"
         const val KEY_BACKEND_CODEC = "backend_codec"
         const val KEY_LOGIN_TRANSCODE = "login_transcode_option"
+
+        const val KEY_EQ_MASTER = "eq_master_enabled"
+        const val KEY_EQ_PRESET = "eq_preset_name"
+        const val KEY_EQ_BANDS = "eq_bands_csv"
+        const val KEY_EQ_PREAMP = "eq_preamp_db"
+        const val KEY_SUB_BASS = "eq_sub_bass_db"
+        const val KEY_SPATIAL = "eq_spatial_enabled"
+        const val KEY_AUTO_GAIN = "eq_auto_gain_enabled"
+        const val KEY_BT_STABILIZER = "bt_car_volume_stabilizer"
 
         private const val KEY_LAST_TRACK = "last_track_state"
         private const val KEY_LAST_POSITION_MS = "last_position_ms"

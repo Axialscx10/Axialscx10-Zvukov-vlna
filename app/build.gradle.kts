@@ -26,8 +26,8 @@ android {
     applicationId = "com.aistudio.soundwave.nctrn"
     minSdk = 24
     targetSdk = 36
-    versionCode = 24
-    versionName = "24.0"
+    versionCode = 31
+    versionName = "31.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -104,4 +104,20 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   debugImplementation(libs.androidx.ui.tooling)
   debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+tasks.register<Copy>("exportDebugApk") {
+  from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+  into("${rootDir}/store-assets")
+  rename { "SoundWave-v31.0.apk" }
+  doFirst {
+    file("${rootDir}/store-assets/SoundWave-v17.0-build17.apk").delete()
+    file("${rootDir}/store-assets/SoundWave-v28.0.apk").delete()
+    file("${rootDir}/store-assets/SoundWave-v29.0.apk").delete()
+    file("${rootDir}/store-assets/SoundWave-v30.0.apk").delete()
+  }
+}
+
+afterEvaluate {
+  tasks.findByName("assembleDebug")?.finalizedBy("exportDebugApk")
 }

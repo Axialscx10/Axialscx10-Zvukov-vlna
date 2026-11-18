@@ -1,5 +1,7 @@
 package com.example.data
 
+import androidx.compose.runtime.Immutable
+
 enum class AppScreen(val title: String) {
     HOME("Domov"),
     EXPLORE("Objavuj"),
@@ -11,6 +13,7 @@ enum class AppScreen(val title: String) {
     SERVER_LOGIN("Prihlásenie na server")
 }
 
+@Immutable
 data class TrackItem(
     val id: String,
     val title: String,
@@ -47,6 +50,7 @@ val NoTrack = TrackItem(
     imageUrl = ""
 )
 
+@Immutable
 data class AlbumItem(
     val id: String,
     val title: String,
@@ -58,6 +62,7 @@ data class AlbumItem(
     val isOutlineBadge: Boolean = false
 )
 
+@Immutable
 data class ArtistItem(
     val id: String,
     val name: String,
@@ -70,6 +75,7 @@ data class ArtistItem(
  * The [id] carries a prefix so the UI can route a click: "pl:" playlist, "al:" album,
  * "ar:" artist, "ge:" genre.
  */
+@Immutable
 data class PlaylistItem(
     val id: String,
     val title: String,
@@ -85,17 +91,20 @@ data class PlaylistItem(
     val isSynced: Boolean = false
 )
 
+@Immutable
 data class GenreItem(
     val name: String,
     val songCount: Int
 )
 
+@Immutable
 data class LyricLine(
     val startMs: Long,
     val text: String
 )
 
 /** Generic "detail" page content: an album, a playlist, an artist, a genre or the favourites. */
+@Immutable
 data class CollectionDetail(
     val id: String,
     val kind: String,
@@ -109,6 +118,7 @@ data class CollectionDetail(
     val error: String? = null
 )
 
+@Immutable
 data class EqBandInfo(
     val index: Int,
     val freqLabel: String,
@@ -116,6 +126,7 @@ data class EqBandInfo(
     val fullFreq: String
 )
 
+@Immutable
 data class HeadphoneProfile(
     val id: String,
     val name: String,
@@ -219,6 +230,9 @@ enum class SleepTimerOption(val label: String, val minutes: Int) {
     END_OF_TRACK("Po dohraní aktuálnej skladby", -1)
 }
 
+private val LEADING_TRACK_NUM_REGEX = Regex("""^\d{1,4}\s*[-._]\s*""")
+private val WHITESPACE_SPLIT_REGEX = Regex("""\s+""")
+
 /**
  * Intelligently cleans raw folder names, file names, or unformatted titles returned by Subsonic / Navidrome.
  * Strips leading track/folder prefixes like "00 - ", "00-", "01. ", "311. ",
@@ -227,12 +241,14 @@ enum class SleepTimerOption(val label: String, val minutes: Int) {
 fun cleanDisplayTitle(raw: String): String {
     if (raw.isBlank()) return raw
     var s = raw.trim()
-    // Strip leading track or album numbers like "00 - ", "00-", "01. ", "02 - ", "311. "
-    s = s.replace(Regex("""^\d{1,4}\s*[-._]\s*"""), "")
+    // Fast-path: only run leading track/album number regex if the first character is a digit
+    if (s.isNotEmpty() && s[0].isDigit()) {
+        s = s.replace(LEADING_TRACK_NUM_REGEX, "")
+    }
     // If it's a raw snake_case or kebab-case filename like "dio-evil_or_divine_live_in_new_york"
     if (s.contains('_') || (s.contains('-') && !s.contains(" - ") && !s.contains(' '))) {
         s = s.replace('_', ' ').replace('-', ' ')
-        s = s.split(Regex("""\s+""")).joinToString(" ") { word ->
+        s = s.split(WHITESPACE_SPLIT_REGEX).joinToString(" ") { word ->
             word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
         }
     }

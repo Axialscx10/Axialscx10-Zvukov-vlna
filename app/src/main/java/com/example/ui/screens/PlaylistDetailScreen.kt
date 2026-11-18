@@ -39,11 +39,12 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.example.ui.components.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -91,6 +93,8 @@ import com.example.data.SmartGenreSpec
 import com.example.data.cleanAlbumName
 import com.example.data.cleanArtistName
 import com.example.data.plural
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val DetailLosslessSuffixes = setOf("flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff")
 
@@ -120,74 +124,90 @@ fun PlaylistDetailScreen(
     }
     val allTracks = detail.tracks
 
-    // Build complete list of albums / soundtracks / works (for Interpret, Žáner/Soundtrack, or multi-album playlists)
-    val artistAlbums = remember(detail.id, detail.albums, allTracks) {
-        if (detail.albums.isNotEmpty()) {
-            detail.albums
-        } else if (detail.kind == "Interpret" || detail.kind == "Žáner" || detail.kind == "Playlist" || detail.kind == "Zbierka") {
-            allTracks
-                .groupBy { t ->
-                    val cleanAlb = cleanAlbumName(t.album).trim()
-                    val hasValidAlbum = cleanAlb.isNotBlank() &&
-                        !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
-                        !cleanAlb.equals("Neznámy album", ignoreCase = true)
-                    when {
-                        t.albumId.isNotBlank() && hasValidAlbum -> "al:${t.albumId}"
-                        hasValidAlbum -> "al_group:$cleanAlb"
-                        else -> {
-                            val cleanArt = cleanArtistName(t.artist).trim().ifBlank { "Rôzne" }
-                            "al_group:$cleanArt"
+    // Build complete list of albums / soundtracks / works off the Main UI Thread
+    val artistAlbums by produceState(
+        initialValue = detail.albums,
+        key1 = detail.id,
+        key2 = detail.albums,
+        key3 = allTracks
+    ) {
+        value = withContext(Dispatchers.Default) {
+            if (detail.albums.isNotEmpty()) {
+                detail.albums.distinctBy { it.id }
+            } else if (detail.kind == "Interpret" || detail.kind == "Žáner" || detail.kind == "Playlist" || detail.kind == "Zbierka") {
+                allTracks
+                    .groupBy { t ->
+                        val cleanAlb = t.album.trim()
+                        val hasValidAlbum = cleanAlb.isNotBlank() &&
+                            !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
+                            !cleanAlb.equals("Neznámy album", ignoreCase = true)
+                        when {
+                            t.albumId.isNotBlank() && hasValidAlbum -> "al:${t.albumId}"
+                            hasValidAlbum -> "al_group:$cleanAlb"
+                            else -> {
+                                val cleanArt = t.artist.trim().ifBlank { "Rôzne" }
+                                "al_group:$cleanArt"
+                            }
                         }
                     }
-                }
-                .map { (key, groupTracks) ->
-                    val first = groupTracks.first()
-                    val cleanAlb = cleanAlbumName(first.album).trim()
-                    val hasValidAlbum = cleanAlb.isNotBlank() &&
-                        !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
-                        !cleanAlb.equals("Neznámy album", ignoreCase = true)
-                    val title = if (hasValidAlbum) cleanAlb else cleanArtistName(first.artist).ifBlank { "Nezaradené" }
-                    AlbumItem(
-                        id = key,
-                        title = title,
-                        subtitle = if (first.year > 0) "${cleanArtistName(first.artist)} • ${first.year}" else cleanArtistName(first.artist),
-                        techSpec = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
-                        badge = first.badge,
-                        imageUrl = first.imageUrl
-                    )
-                }
-                .takeIf { it.size > 1 || detail.kind == "Interpret" || detail.kind == "Žáner" }
-                .orEmpty()
-        } else {
-            emptyList()
+                    .map { (key, groupTracks) ->
+                        val first = groupTracks.first()
+                        val cleanAlb = first.album.trim()
+                        val hasValidAlbum = cleanAlb.isNotBlank() &&
+                            !cleanAlb.equals("Unknown Album", ignoreCase = true) &&
+                            !cleanAlb.equals("Neznámy album", ignoreCase = true)
+                        val title = if (hasValidAlbum) cleanAlb else first.artist.trim().ifBlank { "Nezaradené" }
+                        AlbumItem(
+                            id = key,
+                            title = title,
+                            subtitle = if (first.year > 0) "${first.artist.trim()} • ${first.year}" else first.artist.trim(),
+                            techSpec = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
+                            badge = first.badge,
+                            imageUrl = first.imageUrl
+                        )
+                    }
+                    .distinctBy { it.id }
+                    .takeIf { it.size > 1 || detail.kind == "Interpret" || detail.kind == "Žáner" }
+                    .orEmpty()
+            } else {
+                emptyList()
+            }
         }
     }
 
-    // Build list of artists/composers in this genre/collection when not already on a single artist page
-    val collectionArtists = remember(detail.id, detail.kind, allTracks) {
-        if (detail.kind == "Interpret") {
-            emptyList()
-        } else {
-            allTracks
-                .groupBy { t ->
-                    cleanArtistName(t.artist).trim()
-                        .ifBlank {
-                            if (t.title.contains(" - ")) t.title.substringBefore(" - ").trim() else "Neznámy interpret"
-                        }
-                }
-                .filter { (name, _) -> name.isNotBlank() }
-                .map { (name, groupTracks) ->
-                    val first = groupTracks.first()
-                    ArtistItem(
-                        id = if (first.artistId.isNotBlank()) "ar:${first.artistId}" else "ar_name:$name",
-                        name = name,
-                        trackCount = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
-                        imageUrl = first.imageUrl
-                    ) to first
-                }
-                .sortedBy { it.first.name.lowercase() }
-                .takeIf { it.size > 1 }
-                .orEmpty()
+    // Build list of artists/composers off the Main UI Thread
+    val collectionArtists by produceState(
+        initialValue = emptyList<Pair<ArtistItem, TrackItem>>(),
+        key1 = detail.id,
+        key2 = detail.kind,
+        key3 = allTracks
+    ) {
+        value = withContext(Dispatchers.Default) {
+            if (detail.kind == "Interpret" || allTracks.isEmpty()) {
+                emptyList()
+            } else {
+                allTracks
+                    .groupBy { t ->
+                        t.artist.trim()
+                            .ifBlank {
+                                if (t.title.contains(" - ")) t.title.substringBefore(" - ").trim() else "Neznámy interpret"
+                            }
+                    }
+                    .filter { (name, _) -> name.isNotBlank() }
+                    .map { (name, groupTracks) ->
+                        val first = groupTracks.first()
+                        ArtistItem(
+                            id = if (first.artistId.isNotBlank()) "ar:${first.artistId}" else "ar_name:$name",
+                            name = name,
+                            trackCount = "${groupTracks.size} ${plural(groupTracks.size, "skladba", "skladby", "skladieb")}",
+                            imageUrl = first.imageUrl
+                        ) to first
+                    }
+                    .distinctBy { it.first.id }
+                    .sortedBy { it.first.name.lowercase() }
+                    .takeIf { it.size > 1 }
+                    .orEmpty()
+            }
         }
     }
 
@@ -198,19 +218,27 @@ fun PlaylistDetailScreen(
     // View modes: "SKLADBY" (overview + tracks), "ALBUMY" (full album/soundtrack grid), "INTERPRETI" (full artist grid)
     var viewMode by remember(detail.id) { mutableStateOf("SKLADBY") }
 
-    // Available sub-genre slices inside large genres (e.g., splitting "Rock" into Power Metal, Heavy Metal, SK & CZ, etc.)
-    val subGenreChips = remember(detail.id, detail.kind, detail.title, allTracks) {
-        if (detail.kind == "Žáner" && allTracks.size >= 30) {
-            val currentSpec = SmartGenreCatalog.findSpec(detail.title)
-            SmartGenreCatalog.specs
-                .filter { it.id != currentSpec?.id }
-                .mapNotNull { spec ->
-                    val count = allTracks.count { SmartGenreCatalog.matchesTrack(it, spec) }
-                    if (count >= 3) spec to count else null
-                }
-                .sortedByDescending { it.second }
-        } else {
-            emptyList()
+    // Compute available sub-genre slices on Dispatchers.Default so Main UI Thread never freezes!
+    val subGenreChips by produceState(
+        initialValue = emptyList<Pair<SmartGenreSpec, Int>>(),
+        key1 = detail.id,
+        key2 = detail.kind,
+        key3 = allTracks
+    ) {
+        value = withContext(Dispatchers.Default) {
+            if (detail.kind == "Žáner" && allTracks.size >= 30) {
+                val sample = if (allTracks.size > 180) allTracks.take(180) else allTracks
+                val currentSpec = SmartGenreCatalog.findSpec(detail.title)
+                SmartGenreCatalog.specs
+                    .filter { it.id != currentSpec?.id }
+                    .mapNotNull { spec ->
+                        val count = sample.count { SmartGenreCatalog.matchesTrack(it, spec) }
+                        if (count >= 3) spec to count else null
+                    }
+                    .sortedByDescending { it.second }
+            } else {
+                emptyList()
+            }
         }
     }
 
@@ -230,8 +258,8 @@ fun PlaylistDetailScreen(
             val rawAlbumId = selId.removePrefix("al:").removePrefix("al_group:")
             val selectedAlbumTitle = artistAlbums.find { it.id == selId }?.title ?: rawAlbumId
             result = result.filter { t ->
-                val cleanAlb = cleanAlbumName(t.album).trim()
-                val cleanArt = cleanArtistName(t.artist).trim()
+                val cleanAlb = t.album.trim()
+                val cleanArt = t.artist.trim()
                 (selId.startsWith("al:") && t.albumId == rawAlbumId) ||
                     cleanAlb.equals(selectedAlbumTitle, ignoreCase = true) ||
                     (cleanAlb.isBlank() && cleanArt.equals(selectedAlbumTitle, ignoreCase = true)) ||
@@ -241,7 +269,7 @@ fun PlaylistDetailScreen(
         if (selectedArtistFilterName != null) {
             val targetArtist = selectedArtistFilterName!!
             result = result.filter { t ->
-                val cleanArt = cleanArtistName(t.artist).trim()
+                val cleanArt = t.artist.trim()
                 cleanArt.equals(targetArtist, ignoreCase = true) ||
                     t.artist.contains(targetArtist, ignoreCase = true) ||
                     t.title.startsWith("$targetArtist -", ignoreCase = true)
@@ -262,7 +290,7 @@ fun PlaylistDetailScreen(
             artistAlbums
         } else {
             val trackAlbumIds = tracks.mapNotNull { it.albumId.takeIf { id -> id.isNotBlank() } }.toSet()
-            val trackAlbumTitles = tracks.map { cleanAlbumName(it.album).trim().lowercase() }.toSet()
+            val trackAlbumTitles = tracks.map { it.album.trim().lowercase() }.toSet()
             artistAlbums.filter { alb ->
                 val rawId = alb.id.removePrefix("al:").removePrefix("al_group:")
                 rawId in trackAlbumIds ||
@@ -282,7 +310,7 @@ fun PlaylistDetailScreen(
         var base = if (activeSubGenreSpec == null) {
             collectionArtists
         } else {
-            val matchingArtists = tracks.map { cleanArtistName(it.artist).trim().lowercase() }.toSet()
+            val matchingArtists = tracks.map { it.artist.trim().lowercase() }.toSet()
             collectionArtists.filter { (artist, sampleTrack) ->
                 artist.name.trim().lowercase() in matchingArtists ||
                     SmartGenreCatalog.matchesTrack(sampleTrack, activeSubGenreSpec)
@@ -296,11 +324,13 @@ fun PlaylistDetailScreen(
         base
     }
 
-    val qualityLabel = when {
-        tracks.isEmpty() -> null
-        tracks.any { it.bitDepth >= 24 } -> "HI-RES LOSSLESS"
-        tracks.all { it.suffix in DetailLosslessSuffixes } -> "LOSSLESS"
-        else -> null
+    val qualityLabel = remember(tracks) {
+        when {
+            tracks.isEmpty() -> null
+            tracks.take(25).any { it.bitDepth >= 24 } -> "HI-RES LOSSLESS"
+            tracks.take(25).all { it.suffix in DetailLosslessSuffixes } -> "LOSSLESS"
+            else -> null
+        }
     }
 
     val albumsSectionTitle = when {
@@ -798,12 +828,21 @@ fun PlaylistDetailScreen(
                     }
 
                     // In-collection search/filter bar
+                    var isFilterFocused by remember { mutableStateOf(false) }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
                             .clip(RoundedCornerShape(50))
                             .background(SurfaceContainerHigh)
+                            .then(
+                                if (isFilterFocused) {
+                                    Modifier.border(3.dp, Color(0xFFFFEA00), RoundedCornerShape(50))
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .onFocusChanged { isFilterFocused = it.hasFocus }
                             .padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -978,7 +1017,7 @@ fun PlaylistDetailScreen(
                 }
             }
             val rows = filteredAlbums.chunked(2)
-            items(rows, key = { row -> "album_row_${row.first().id}" }) { rowAlbums ->
+            itemsIndexed(rows, key = { idx, row -> "album_row_${idx}_${row.first().id}" }) { _, rowAlbums ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -994,8 +1033,8 @@ fun PlaylistDetailScreen(
                                     val rawId = album.id.removePrefix("al:").removePrefix("al_group:")
                                     val hasLocal = allTracks.any {
                                         it.albumId == rawId ||
-                                            cleanAlbumName(it.album).equals(album.title, ignoreCase = true) ||
-                                            cleanArtistName(it.artist).equals(album.title, ignoreCase = true)
+                                            it.album.equals(album.title, ignoreCase = true) ||
+                                            it.artist.equals(album.title, ignoreCase = true)
                                     }
                                     if (hasLocal) {
                                         selectedAlbumFilterId = album.id
@@ -1042,7 +1081,7 @@ fun PlaylistDetailScreen(
                 }
             }
             val artistRows = filteredArtists.chunked(2)
-            items(artistRows, key = { row -> "artist_row_${row.first().first.id}" }) { rowItems ->
+            itemsIndexed(artistRows, key = { idx, row -> "artist_row_${idx}_${row.first().first.id}" }) { _, rowItems ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1119,7 +1158,7 @@ fun PlaylistDetailScreen(
                                     )
                                 }
                             }
-                            if (filteredAlbums.size > 8) {
+                            if (filteredAlbums.size > 4) {
                                 Text(
                                     text = "Všetky (${filteredAlbums.size}) ➔",
                                     color = SecondaryFixed,
@@ -1133,8 +1172,8 @@ fun PlaylistDetailScreen(
                             }
                         }
 
-                        // Show up to 8 albums in overview (or all if <= 10) so TV remote can easily reach tracks too
-                        val previewAlbums = if (filteredAlbums.size <= 10) filteredAlbums else filteredAlbums.take(8)
+                        // Show up to 4 albums (2 rows) in overview so Android TV composes instantaneously and D-pad reaches tracks in 2 clicks
+                        val previewAlbums = filteredAlbums.take(4)
                         previewAlbums.chunked(2).forEach { rowAlbums ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1230,7 +1269,7 @@ fun PlaylistDetailScreen(
                                     )
                                 }
                             }
-                            items(filteredAlbums.take(40), key = { "filter_${it.id}" }) { album ->
+                            itemsIndexed(filteredAlbums.take(15), key = { idx, alb -> "filter_${idx}_${alb.id}" }) { _, album ->
                                 val isSelected = selectedAlbumFilterId == album.id
                                 Box(
                                     modifier = Modifier
@@ -1415,7 +1454,9 @@ private fun ArtistAlbumRowCard(
         if (onSecondaryAction != null) {
             IconButton(
                 onClick = onSecondaryAction,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .focusProperties { canFocus = false }
             ) {
                 Icon(
                     imageVector = Icons.Default.Person,
@@ -1573,7 +1614,13 @@ private fun PlaylistTrackItemRow(
                         modifier = Modifier
                             .weight(1f, fill = false)
                             .then(
-                                if (showArtistButton) Modifier.clickable { onArtistClick() } else Modifier
+                                if (showArtistButton) {
+                                    Modifier
+                                        .focusProperties { canFocus = false }
+                                        .clickable { onArtistClick() }
+                                } else {
+                                    Modifier
+                                }
                             )
                     )
                 }
@@ -1603,7 +1650,9 @@ private fun PlaylistTrackItemRow(
             if (showArtistButton) {
                 IconButton(
                     onClick = onArtistClick,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier
+                        .size(32.dp)
+                        .focusProperties { canFocus = false }
                 ) {
                     Icon(
                         imageVector = Icons.Default.Person,

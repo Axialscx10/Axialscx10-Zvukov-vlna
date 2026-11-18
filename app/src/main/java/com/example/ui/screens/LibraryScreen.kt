@@ -46,7 +46,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.example.ui.components.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -144,12 +144,21 @@ fun LibraryScreen(
     val isDownloaded = uiState.libraryFilterChip == "Stiahnuté"
 
     // Rows for the currently selected chip (albums / artists / playlists share the same row layout).
-    val rows: List<PlaylistItem> = when (uiState.libraryFilterChip) {
-        "Albumy" -> uiState.libraryAlbums.map { it.toRow() }
-        "Interpreti" -> uiState.libraryArtists.map { it.toRow() }
-        "Playlisty", "Playlists" -> uiState.libraryPlaylists
-        else -> emptyList()
+    // Memoized so progress updates and D-pad focus changes do not re-allocate thousands of items!
+    val rows: List<PlaylistItem> = remember(
+        uiState.libraryFilterChip,
+        uiState.libraryAlbums,
+        uiState.libraryArtists,
+        uiState.libraryPlaylists
+    ) {
+        when (uiState.libraryFilterChip) {
+            "Albumy" -> uiState.libraryAlbums.distinctBy { it.id }.map { it.toRow() }
+            "Interpreti" -> uiState.libraryArtists.distinctBy { it.id }.map { it.toRow() }
+            "Playlisty", "Playlists" -> uiState.libraryPlaylists.distinctBy { it.id }
+            else -> emptyList()
+        }
     }
+    val chunkedRows = remember(rows) { rows.chunked(2) }
     val itemCount = when {
         isHistory -> uiState.historyTracks.size
         isFavorites -> uiState.favoriteTracks.size
@@ -525,7 +534,7 @@ fun LibraryScreen(
                         }
                     }
                 }
-                items(uiState.historyTracks, key = { it.id }) { track ->
+                items(uiState.historyTracks.distinctBy { it.id }, key = { "hist_${it.id}" }) { track ->
                     LibraryTrackRow(
                         track = track,
                         isActive = uiState.currentTrack.id == track.id,
@@ -599,7 +608,7 @@ fun LibraryScreen(
                         }
                     }
                 }
-                items(uiState.downloadedTracks, key = { it.id }) { track ->
+                items(uiState.downloadedTracks.distinctBy { it.id }, key = { "dl_${it.id}" }) { track ->
                     LibraryTrackRow(
                         track = track,
                         isActive = uiState.currentTrack.id == track.id,
@@ -610,7 +619,7 @@ fun LibraryScreen(
                 }
             }
         } else if (isFavorites) {
-            items(uiState.favoriteTracks, key = { it.id }) { track ->
+            items(uiState.favoriteTracks.distinctBy { it.id }, key = { "fav_${it.id}" }) { track ->
                 LibraryTrackRow(
                     track = track,
                     isActive = uiState.currentTrack.id == track.id,
@@ -620,7 +629,7 @@ fun LibraryScreen(
                 )
             }
         } else if (uiState.libraryIsGridView) {
-            items(rows.chunked(2), key = { chunk -> chunk.first().id }) { pair ->
+            items(chunkedRows, key = { chunk -> chunk.first().id }) { pair ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

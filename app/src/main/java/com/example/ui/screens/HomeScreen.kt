@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,9 +35,10 @@ import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.example.ui.components.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,11 +86,12 @@ fun HomeScreen(
     onRetry: () -> Unit,
     onTrackMenu: (TrackItem) -> Unit = {}
 ) {
-    val filters = listOf("Všetko") + uiState.homeGenres
+    val filters = remember(uiState.homeGenres) { (listOf("Všetko") + uiState.homeGenres).distinct() }
+    val distinctPlaylists = remember(uiState.libraryPlaylists) { uiState.libraryPlaylists.distinctBy { it.id } }
     val hasContent = uiState.homeQuickPicks.isNotEmpty() ||
         uiState.homeListenAgain.isNotEmpty() ||
         uiState.homeNewest.isNotEmpty() ||
-        uiState.libraryPlaylists.isNotEmpty()
+        distinctPlaylists.isNotEmpty()
 
     LazyColumn(
         modifier = Modifier
@@ -96,7 +99,7 @@ fun HomeScreen(
             .background(Surface)
             .testTag("home_screen"),
         contentPadding = PaddingValues(bottom = 160.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Filter Chips Carousel (genres from the server)
         if (filters.size > 1) {
@@ -163,67 +166,64 @@ fun HomeScreen(
 
         // SECTION 1: Quick picks (random songs from the server)
         if (uiState.homeQuickPicks.isNotEmpty()) {
-            item {
-                Column(
+            item(key = "home_qp_header") {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
+                    Column {
+                        Text(
+                            text = "SPUSTIŤ RÁDIO ZO SKLADBY",
+                            color = Primary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Rýchly výber",
+                            color = OnSurface,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.4).sp
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(SurfaceContainerHigh)
+                            .clickable { onPlayAll() }
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .testTag("home_play_all_btn")
                     ) {
-                        Column {
-                            Text(
-                                text = "SPUSTIŤ RÁDIO ZO SKLADBY",
-                                color = Primary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Rýchly výber",
-                                color = OnSurface,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = (-0.4).sp
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(SurfaceContainerHigh)
-                                .clickable { onPlayAll() }
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                                .testTag("home_play_all_btn")
-                        ) {
-                            Text(
-                                text = "Prehrať všetko",
-                                color = OnSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Text(
+                            text = "Prehrať všetko",
+                            color = OnSurface,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        uiState.homeQuickPicks.forEach { track ->
-                            val isActive = uiState.currentTrack.id == track.id
-                            val isLiked = track.id in uiState.likedTrackIds
-                            QuickPickTrackRow(
-                                track = track,
-                                isActive = isActive,
-                                isPlaying = isActive && uiState.isPlaying,
-                                isLiked = isLiked,
-                                onClick = { onTrackClick(track) },
-                                onLikeClick = { onTrackLikeToggle(track.id) },
-                                onMenuClick = { onTrackMenu(track) }
-                            )
-                        }
-                    }
+                }
+            }
+            itemsIndexed(
+                items = uiState.homeQuickPicks,
+                key = { idx, track -> "home_qp_${idx}_${track.id}" }
+            ) { _, track ->
+                val isActive = uiState.currentTrack.id == track.id
+                val isLiked = track.id in uiState.likedTrackIds
+                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    QuickPickTrackRow(
+                        track = track,
+                        isActive = isActive,
+                        isPlaying = isActive && uiState.isPlaying,
+                        isLiked = isLiked,
+                        onClick = { onTrackClick(track) },
+                        onLikeClick = { onTrackLikeToggle(track.id) },
+                        onMenuClick = { onTrackMenu(track) }
+                    )
                 }
             }
         }
@@ -261,8 +261,8 @@ fun HomeScreen(
         }
 
         // SECTION 4: Playlists
-        if (uiState.libraryPlaylists.isNotEmpty()) {
-            item {
+        if (distinctPlaylists.isNotEmpty()) {
+            item(key = "home_playlists_section") {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -313,7 +313,7 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(uiState.libraryPlaylists, key = { it.id }) { mix ->
+                        items(distinctPlaylists, key = { it.id }) { mix ->
                             MixedForYouCard(
                                 playlist = mix,
                                 onClick = { onPlaylistClick(mix) }
@@ -401,11 +401,12 @@ private fun HomeAlbumSection(
             }
         }
 
+        val distinctAlbums = remember(albums) { albums.distinctBy { it.id } }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(albums, key = { it.id }) { album ->
+            items(distinctAlbums, key = { it.id }) { album ->
                 ListenAgainAlbumCard(
                     album = album,
                     onClick = { onAlbumClick(album) }
@@ -543,8 +544,10 @@ private fun ListenAgainAlbumCard(
 ) {
     Column(
         modifier = Modifier
-            .width(152.dp)
+            .width(156.dp)
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
+            .padding(4.dp)
     ) {
         Box(
             modifier = Modifier
@@ -602,8 +605,10 @@ private fun MixedForYouCard(
 ) {
     Column(
         modifier = Modifier
-            .width(168.dp)
+            .width(172.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
+            .padding(4.dp)
     ) {
         Box(
             modifier = Modifier
